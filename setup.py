@@ -54,7 +54,7 @@ setup(
     install_requires=['pyasn1',
                       'pyasn1_modules',
                       'javaobj-py3',
-                      'pycrypto',
+                      'cryptography',
                       'twofish'],
     test_suite="tests.test_jks",
 )

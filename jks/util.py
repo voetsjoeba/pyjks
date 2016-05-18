@@ -3,6 +3,7 @@ from __future__ import print_function
 import textwrap
 import base64
 import struct
+from cryptography.hazmat.primitives import padding
 
 b8 = struct.Struct('>Q')
 b4 = struct.Struct('>L') # unsigned
@@ -165,33 +166,17 @@ def pkey_as_pem(pk):
     else:
         return as_pem(pk.pkey_pkcs8, "PRIVATE KEY")
 
-def strip_pkcs5_padding(m):
-    """
-    Drop PKCS5 padding:  8-(||M|| mod 8) octets each with value 8-(||M|| mod 8)
-    Note: ideally we would use pycrypto for this, but it doesn't provide padding functionality and the project is virtually dead at this point.
-    """
-    return strip_pkcs7_padding(m, 8)
+def add_pkcs7_padding(m, block_size):
+    try:
+        padder = padding.PKCS7(block_size*8).padder()
+        return padder.update(m) + padder.finalize()
+    except Exception as e:
+        raise BadPaddingException(str(e))
 
 def strip_pkcs7_padding(m, block_size):
-    """
-    Same as PKCS#5 padding, except generalized to block sizes other than 8.
-    """
-    if len(m) < block_size or len(m) % block_size != 0:
-        raise BadPaddingException("Unable to strip padding: invalid message length")
+    try:
+        unpadder = padding.PKCS7(block_size*8).unpadder()
+        return unpadder.update(m) + unpadder.finalize()
+    except Exception as e:
+        raise BadPaddingException(str(e))
 
-    m = bytearray(m) # py2/3 compatibility: always returns individual indexed elements as ints
-    last_byte = m[-1]
-    # the <last_byte> bytes of m must all have value <last_byte>, otherwise something's wrong
-    if (last_byte <= 0 or last_byte > block_size) or (m[-last_byte:] != bytearray([last_byte])*last_byte):
-        raise BadPaddingException("Unable to strip padding: invalid padding found")
-
-    return bytes(m[:-last_byte]) # back to 'str'/'bytes'
-
-def add_pkcs7_padding(m, block_size):
-    if block_size <= 0 or block_size > 255:
-        raise ValueError("Invalid block size")
-
-    m = bytearray(m)
-    num_padding_bytes = block_size - (len(m) % block_size)
-    m = m + bytearray([num_padding_bytes]*num_padding_bytes)
-    return bytes(m)

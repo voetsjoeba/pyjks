@@ -369,6 +369,12 @@ class BksOnlyTests(AbstractTest):
             b"\x00\x00\x00\x14" + \
             jks.rfc7292.encrypt_PBEWithSHAAndTwofishCBC(b"\x00" + b"\00"*10, password, salt, 0x14), password) # insufficient signature bytes
 
+        self.assertRaises(jks.util.KeystoreException, jks.bks.UberKeyStore.loads,
+            b"\x00\x00\x00\x01" + \
+            b"\x00\x00\x00\x08" + salt + \
+            b"\x00\x00\x00\x14" + \
+            b"\x00", "") # non 16-byte aligned twofish encrypted data
+
     def test_empty_store_v1(self):
         store = jks.bks.BksKeyStore.load(KS_PATH + "/bks/empty.bksv1", "")
         self.assertEqual(store.version, 1)
@@ -544,26 +550,6 @@ class MiscTests(AbstractTest):
         self.assertEqual(bs2b(self, "   0 1111 1111"), b"\x00\xff")
         self.assertEqual(bs2b(self, "   1 1111 1111"), b"\x01\xff")
 
-    def test_strip_pkcs5_padding(self):
-        self.assertEqual(jks.util.strip_pkcs5_padding(b"\x08\x08\x08\x08\x08\x08\x08\x08"), b"")
-        self.assertEqual(jks.util.strip_pkcs5_padding(b"\x01\x07\x07\x07\x07\x07\x07\x07"), b"\x01")
-        self.assertEqual(jks.util.strip_pkcs5_padding(b"\x01\x02\x03\x04\x05\x06\x07\x01"), b"\x01\x02\x03\x04\x05\x06\x07")
-
-        self.assertRaises(jks.util.BadPaddingException, jks.util.strip_pkcs5_padding, b"")
-        self.assertRaises(jks.util.BadPaddingException, jks.util.strip_pkcs5_padding, b"\x01")
-        self.assertRaises(jks.util.BadPaddingException, jks.util.strip_pkcs5_padding, b"\x01\x02\x03\x04\x08\x08")
-        self.assertRaises(jks.util.BadPaddingException, jks.util.strip_pkcs5_padding, b"\x07\x07\x07\x07\x07\x07\x07")
-        self.assertRaises(jks.util.BadPaddingException, jks.util.strip_pkcs5_padding, b"\x00\x00\x00\x00\x00\x00\x00\x00")
-
-    def test_add_pkcs7_padding(self):
-        self.assertEqual(jks.util.add_pkcs7_padding(b"", 8),     b"\x08\x08\x08\x08\x08\x08\x08\x08")
-        self.assertEqual(jks.util.add_pkcs7_padding(b"\x01", 8), b"\x01\x07\x07\x07\x07\x07\x07\x07")
-        self.assertEqual(jks.util.add_pkcs7_padding(b"\x01\x02\x03\x04\x05\x06\x07", 8), b"\x01\x02\x03\x04\x05\x06\x07\x01")
-
-        self.assertRaises(ValueError, jks.util.add_pkcs7_padding, b"", -8)   # block size too small
-        self.assertRaises(ValueError, jks.util.add_pkcs7_padding, b"", 0)    # block size too small
-        self.assertRaises(ValueError, jks.util.add_pkcs7_padding, b"", 256)  # block size too large
-
     def test_sun_jce_pbe_decrypt(self):
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\xc4\x20\x59\xac\x54\x03\xc7\xbf", "my_password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 42))
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\xef\x9f\xbd\xc5\x91\x5f\x49\x50", "my_password", b"\x01\x02\x03\x04\x01\x02\x03\x05", 42))
@@ -573,19 +559,19 @@ class MiscTests(AbstractTest):
         self.assertRaises(ValueError, jks.sun_crypto.jce_pbe_decrypt, b"\xc4\x20\x59\xac\x54\x03\xc7\xbf", "my_p\xc3\xa1ssword", b"\x01\x02\x03\x04\x05\x06\x07\x08", 42) # non-ASCII password characters
 
     def test_pkcs12_key_derivation(self):
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_MAC_MATERIAL, "", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 16), b"\xe7\x76\x85\x01\x6a\x53\x62\x1e\x9a\x2a\x8a\x0f\x80\x00\x2e\x70")
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_MAC_MATERIAL, "", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\xe7\x76\x85\x01\x6a\x53\x62\x1e\x9a\x2a\x8a\x0f\x80\x00\x2e\x70\xfe")
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_KEY_MATERIAL, "", b"\xbf\x0a\xaa\x4f\x84\xb4\x4e\x41\x16\x0a\x11\xb7\xed\x98\x58\xa0\x95\x3b\x4b\xf8", 2010, 2), b"\x1b\xee")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_MAC_MATERIAL, "", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 16), b"\xe7\x76\x85\x01\x6a\x53\x62\x1e\x9a\x2a\x8a\x0f\x80\x00\x2e\x70")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_MAC_MATERIAL, "", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\xe7\x76\x85\x01\x6a\x53\x62\x1e\x9a\x2a\x8a\x0f\x80\x00\x2e\x70\xfe")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_KEY_MATERIAL, "", b"\xbf\x0a\xaa\x4f\x84\xb4\x4e\x41\x16\x0a\x11\xb7\xed\x98\x58\xa0\x95\x3b\x4b\xf8", 2010, 2), b"\x1b\xee")
 
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_MAC_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 0), b"")
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_MAC_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 16), b"\x21\x2b\xab\x71\x42\x2d\x31\xa5\xd3\x93\x4c\x20\xe5\xe7\x7e\xb7")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_MAC_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 0), b"")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_MAC_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 16), b"\x21\x2b\xab\x71\x42\x2d\x31\xa5\xd3\x93\x4c\x20\xe5\xe7\x7e\xb7")
 
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_MAC_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\x21\x2b\xab\x71\x42\x2d\x31\xa5\xd3\x93\x4c\x20\xe5\xe7\x7e\xb7\xed")
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_KEY_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\xe8\x0b\xdd\x02\x01\x55\x31\x7f\x30\xb8\x54\xcb\x9f\x78\x11\x81\x76")
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_IV_MATERIAL,  "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\x27\x68\x91\x7c\xf9\xf4\x33\xb0\xa6\x4a\x9f\xcc\xbc\x80\x5f\xd6\x48")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_MAC_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\x21\x2b\xab\x71\x42\x2d\x31\xa5\xd3\x93\x4c\x20\xe5\xe7\x7e\xb7\xed")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_KEY_MATERIAL, "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\xe8\x0b\xdd\x02\x01\x55\x31\x7f\x30\xb8\x54\xcb\x9f\x78\x11\x81\x76")
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_IV_MATERIAL,  "password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 17), b"\x27\x68\x91\x7c\xf9\xf4\x33\xb0\xa6\x4a\x9f\xcc\xbc\x80\x5f\xd6\x48")
 
         fancy_password = u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029"
-        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_KEY_MATERIAL, fancy_password, b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 129),
+        self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PKCS12KDF.PURPOSE_KEY_MATERIAL, fancy_password, b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 129),
             b"\x5e\x3d\xab\x11\xd7\x55\x2c\xaf\x58\x2f\x61\xbd\x95\xdd\x03\xa7\x83\xa4\xf0\x2a\xeb\xdc\x86\x5c\xdb\x1e\xae\x2c\x8f\x91\x82\xa5" + \
             b"\x84\xbf\xab\x23\x75\x1c\x83\x96\x34\xcf\x0e\xc1\x6c\x84\xd7\x15\xd1\x7c\x10\x3d\x8b\xa8\xef\x1f\x63\xb4\x71\xdf\x15\x4f\xc2\x86" + \
             b"\xf9\x5c\xba\x37\xad\xd3\xe2\xb2\xaa\xb3\x37\x60\x42\x3d\x69\x29\xd1\x96\x47\x32\x6c\x41\x57\xfa\x0e\x20\x87\xd6\xa7\x40\xae\x0f" + \

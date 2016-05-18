@@ -3,7 +3,9 @@ import struct
 import hashlib
 from pyasn1.codec.ber import decoder
 from pyasn1_modules import rfc5208, rfc2459
-from Crypto.Hash import HMAC, SHA
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hmac as m_hmac
+from cryptography.hazmat.primitives import hashes as m_hashes
 from .util import *
 from .jks import KeyStore, TrustedCertEntry
 from . import rfc7292
@@ -280,17 +282,17 @@ class BksKeyStore(AbstractKeystore):
             hmac_fn = hashlib.sha1
             hmac_digest_size = hmac_fn().digest_size
             hmac_key_size = hmac_digest_size*8 if version != 1 else hmac_digest_size
-            hmac_key = rfc7292.derive_key(hmac_fn, rfc7292.PURPOSE_MAC_MATERIAL, store_password, salt, iteration_count, hmac_key_size//8)
+            hmac_key = rfc7292.derive_key(hmac_fn, rfc7292.PKCS12KDF.PURPOSE_MAC_MATERIAL, store_password, salt, iteration_count, hmac_key_size//8)
 
             store_data = data[pos:pos+size]
             store_hmac = data[pos+size:pos+size+hmac_digest_size]
             if len(store_hmac) != hmac_digest_size:
                 raise BadKeystoreFormatException("Bad HMAC size; found %d bytes, expected %d bytes" % (len(store_hmac), hmac_digest_size))
 
-            hmac = HMAC.new(hmac_key, digestmod=SHA)
+            hmac = m_hmac.HMAC(hmac_key, m_hashes.SHA1(), backend=default_backend())
             hmac.update(store_data)
 
-            computed_hmac = hmac.digest()
+            computed_hmac = hmac.finalize()
             if store_hmac != computed_hmac:
                 raise KeystoreSignatureException("Hash mismatch; incorrect keystore password?")
             return cls(store_type, entries, version=version)
