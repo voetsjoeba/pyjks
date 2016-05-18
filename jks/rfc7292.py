@@ -44,7 +44,7 @@ def derive_key(hashfn, purpose_byte, password_str, salt, iteration_count, desire
 
     I = S + P
     c = (desired_key_size + u - 1)//u
-    derived_key = b""
+    derived_key = bytearray()
 
     for i in range(1,c+1):
         A = hashfn(bytes(D + I)).digest()
@@ -60,11 +60,11 @@ def derive_key(hashfn, purpose_byte, password_str, salt, iteration_count, desire
         for j in range(len(I)//v):
             _adjust(I, j*v, B)
 
-        derived_key += bytes(A)
+        derived_key.extend(A)
 
     # truncate derived_key to the desired size
     derived_key = derived_key[:desired_key_size]
-    return derived_key
+    return bytes(derived_key)
 
 def _adjust(a, a_offset, b):
     """
