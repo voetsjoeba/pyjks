@@ -1,8 +1,7 @@
 # vim: set et ai ts=4 sts=4 sw=4:
 import struct
 import hashlib
-from pyasn1.codec.ber import decoder
-from pyasn1_modules import rfc5208, rfc2459
+import asn1crypto
 from Crypto.Hash import HMAC, SHA
 from .util import *
 from .jks import KeyStore, TrustedCertEntry
@@ -45,19 +44,19 @@ class BksKeyEntry(AbstractBksEntry):
             if self.format not in ["PKCS8", "PKCS#8"]:
                 raise UnexpectedKeyEncodingException("Unexpected encoding for private key entry: '%s'" % self.format)
             # self.encoded is a PKCS#8 PrivateKeyInfo
-            private_key_info = decoder.decode(self.encoded, asn1Spec=rfc5208.PrivateKeyInfo())[0]
+            private_key_info = asn1crypto.keys.PrivateKeyInfo.load(self.encoded)
             self.pkey_pkcs8 = self.encoded
-            self.pkey = private_key_info['privateKey'].asOctets()
-            self.algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
+            self.pkey = private_key_info['private_key'].contents
+            self.algorithm_oid = private_key_info['private_key_algorithm']['algorithm'].__unicode__() # disable automatic OID -> short name mapping
 
         elif self.type == self.KEY_TYPE_PUBLIC:
             if self.format not in ["X.509", "X509"]:
                 raise UnexpectedKeyEncodingException("Unexpected encoding for public key entry: '%s'" % self.format)
             # self.encoded is an X.509 SubjectPublicKeyInfo
-            spki = decoder.decode(self.encoded, asn1Spec=rfc2459.SubjectPublicKeyInfo())[0]
+            spki = asn1crypto.keys.PublicKeyInfo.load(self.encoded)
             self.public_key_info = self.encoded
-            self.public_key = bitstring_to_bytes(spki['subjectPublicKey'])
-            self.algorithm_oid = spki['algorithm']['algorithm'].asTuple()
+            self.public_key = bytes(spki['public_key'])
+            self.algorithm_oid = spki['algorithm']['algorithm'].__unicode__() # disable automatic OID -> short name mapping
 
         elif self.type == self.KEY_TYPE_SECRET:
             if self.format != "RAW":

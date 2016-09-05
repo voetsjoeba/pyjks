@@ -14,8 +14,7 @@ This is better:
 ## Requirements:
 
  * Python 2.6+ or Python 3.3+
- * pyasn1 0.1.7+
- * pyasn1_modules 0.0.8+
+ * asn1crypto 0.17.1+
  * javaobj-py3 0.1.4+
  * pycrypto, if you need to read JCEKS, BKS or UBER keystores
  * twofish, if you need to read UBER keystores

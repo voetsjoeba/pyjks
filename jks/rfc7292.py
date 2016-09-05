@@ -2,7 +2,7 @@
 from __future__ import print_function
 import hashlib
 import ctypes
-from pyasn1.type import univ, namedtype
+import asn1crypto
 from Crypto.Cipher import DES3
 from .util import xor_bytearrays, add_pkcs7_padding, strip_pkcs7_padding, BadDataLengthException
 
@@ -10,13 +10,6 @@ PBE_WITH_SHA1_AND_TRIPLE_DES_CBC_OID = (1,2,840,113549,1,12,1,3)
 PURPOSE_KEY_MATERIAL = 1
 PURPOSE_IV_MATERIAL = 2
 PURPOSE_MAC_MATERIAL = 3
-
-class Pkcs12PBEParams(univ.Sequence):
-    """Virtually identical to PKCS#5's PBEParameter, but nevertheless has its own definition in its own RFC, so gets its own class."""
-    componentType = namedtype.NamedTypes(
-        namedtype.NamedType('salt', univ.OctetString()),
-        namedtype.NamedType('iterations', univ.Integer())
-    )
 
 def derive_key(hashfn, purpose_byte, password_str, salt, iteration_count, desired_key_size):
     """

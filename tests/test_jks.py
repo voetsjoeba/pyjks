@@ -320,12 +320,12 @@ class BksOnlyTests(AbstractTest):
         if key_entry.type == jks.bks.BksKeyEntry.KEY_TYPE_PRIVATE:
             self.assertTrue(isinstance(key_entry.pkey_pkcs8, bytes))
             self.assertTrue(isinstance(key_entry.pkey, bytes))
-            self.assertTrue(isinstance(key_entry.algorithm_oid, tuple))
+            self.assertTrue(isinstance(key_entry.algorithm_oid, jks.util.py23basestring))
 
         elif key_entry.type == jks.bks.BksKeyEntry.KEY_TYPE_PUBLIC:
             self.assertTrue(isinstance(key_entry.public_key_info, bytes))
             self.assertTrue(isinstance(key_entry.public_key, bytes))
-            self.assertTrue(isinstance(key_entry.algorithm_oid, tuple))
+            self.assertTrue(isinstance(key_entry.algorithm_oid, jks.util.py23basestring))
 
         elif key_entry.type == jks.bks.BksKeyEntry.KEY_TYPE_SECRET:
             self.assertTrue(isinstance(key_entry.key, bytes))
