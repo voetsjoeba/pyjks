@@ -10,6 +10,7 @@ import os, sys
 import jks
 import unittest
 import hashlib
+import time
 from . import expected
 from jks.util import py23basestring
 
@@ -72,6 +73,18 @@ class JksTests(AbstractTest):
         self.assertRaises(jks.util.UnsupportedKeystoreVersionException, jks.KeyStore.loads, b"\xFE\xED\xFE\xED\x00\x00\x00\x00", "") # unknown store version
         self.assertRaises(jks.util.KeystoreSignatureException, jks.KeyStore.loads, b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*20, "") # bad signature
         self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*19, "") # insufficient signature bytes
+
+        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
+            b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x01"
+            b"\x00\x00\x00\x02" b"\x00\x05" b"\xFF\xFF\xFF\xFF\xFF", "") # bad alias UTF-8 data
+
+        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
+            b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x01"
+            b"\xFF\xFF\xFF\xFF" b"\x00\x05" b"\x41\x41\x41\x41\x41" + jks.util.b8.pack(int(time.time()*1000)), "") # unknown entry type
+
+        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
+            b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x01"
+            b"\x00\x00\x00\x03" b"\x00\x05" b"\x41\x41\x41\x41\x41" + jks.util.b8.pack(int(time.time()*1000)), "") # JCEKS entry type in JKS store
 
     def test_trailing_data(self):
         """Issue #21 on github; Portecle is able to load keystores with trailing data after the hash, so we should be as well."""
@@ -148,6 +161,10 @@ class JceTests(AbstractTest):
         self.assertRaises(jks.util.UnsupportedKeystoreVersionException, jks.KeyStore.loads, b"\xCE\xCE\xCE\xCE\x00\x00\x00\x00", "") # unknown store version
         self.assertRaises(jks.util.KeystoreSignatureException, jks.KeyStore.loads, b"\xCE\xCE\xCE\xCE\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*20, "") # bad signature
         self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\xCE\xCE\xCE\xCE\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*19, "") # insufficient signature bytes
+
+        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
+            b"\xCE\xCE\xCE\xCE\x00\x00\x00\x02\x00\x00\x00\x01"
+            b"\x00\x00\x00\x02" b"\x00\x05" b"\xFF\xFF\xFF\xFF\xFF", "") # bad alias UTF-8 data
 
     def test_trailing_data(self):
         """Issue #21 on github; Portecle is able to load keystores with trailing data after the hash, so we should be as well."""
@@ -263,6 +280,7 @@ class BksOnlyTests(AbstractTest):
     def check_bks_entry(self, entry, store_type):
         """Checks that apply to BKS entries of any type"""
         self.assertEqual(entry.store_type, store_type)
+        self.assertTrue(entry.is_decrypted())
         self.assertTrue(isinstance(entry.alias, py23basestring))
         self.assertTrue(isinstance(entry.timestamp, int))
         self.assertTrue(isinstance(entry.cert_chain, list))
@@ -270,6 +288,7 @@ class BksOnlyTests(AbstractTest):
 
     def check_cert_entry(self, entry, store_type):
         self.check_bks_entry(entry, store_type)
+        self.assertTrue(entry.is_decrypted())
         self.assertTrue(isinstance(entry.cert, bytes))
         self.assertTrue(isinstance(entry.type, py23basestring))
         self.assertTrue(entry.is_decrypted())
@@ -285,6 +304,7 @@ class BksOnlyTests(AbstractTest):
 
     def check_secret_key_entry(self, entry, store_type):
         self.check_bks_entry(entry, store_type)
+        self.assertTrue(entry.is_decrypted())
         self.assertTrue(isinstance(entry, jks.bks.BksSecretKeyEntry))
         self.assertTrue(isinstance(entry.key, bytes))
 
@@ -450,6 +470,7 @@ class BksOnlyTests(AbstractTest):
         sealed_public.decrypt("public_password")
         self.assertTrue(sealed_public.is_decrypted())
         for a in attrs_encrypted_public: getattr(sealed_public, a) # shouldn't throw
+        sealed_public.decrypt("wrong_password") # additional decrypt() calls should do nothing
 
         sealed_private = store.entries["sealed_private_key"]
         self.assertFalse(sealed_private.is_decrypted())
@@ -459,6 +480,7 @@ class BksOnlyTests(AbstractTest):
         sealed_private.decrypt("private_password")
         self.assertTrue(sealed_private.is_decrypted())
         for a in attrs_encrypted_private: getattr(sealed_private, a) # shouldn't throw
+        sealed_private.decrypt("wrong_password") # additional decrypt() calls should do nothing
 
         sealed_secret = store.entries["sealed_secret_key"]
         self.assertFalse(sealed_secret.is_decrypted())
@@ -468,6 +490,7 @@ class BksOnlyTests(AbstractTest):
         sealed_secret.decrypt("secret_password")
         self.assertTrue(sealed_secret.is_decrypted())
         for a in attrs_encrypted_secret: getattr(sealed_secret, a) # shouldn't throw
+        sealed_secret.decrypt("wrong_password") # additional decrypt() calls should do nothing
 
     def test_trailing_data_v1(self):
         """Issue #21 on github; Portecle is able to load keystores with trailing data after the HMAC signature, so we should be as well."""
@@ -495,6 +518,12 @@ class BksOnlyTests(AbstractTest):
             christmas_store_bytes = f.read()
         self.assertRaises(jks.util.DecryptionFailureException, jks.bks.UberKeyStore.loads, christmas_store_bytes + b"\x00"*256, "12345678") # maintain multiple of 16B -> decryption failure
         self.assertRaises(jks.util.BadKeystoreFormatException, jks.bks.UberKeyStore.loads, christmas_store_bytes + b"\x00"*255, "12345678") # break multiple of 16B -> bad format
+
+    def test_type2str(self):
+        self.assertEqual(jks.bks.BksKeyEntry.type2str(jks.bks.BksKeyEntry.KEY_TYPE_PUBLIC),  "PUBLIC")
+        self.assertEqual(jks.bks.BksKeyEntry.type2str(jks.bks.BksKeyEntry.KEY_TYPE_PRIVATE), "PRIVATE")
+        self.assertEqual(jks.bks.BksKeyEntry.type2str(jks.bks.BksKeyEntry.KEY_TYPE_SECRET),  "SECRET")
+        self.assertEqual(jks.bks.BksKeyEntry.type2str(-1),  None)
 
 
 class MiscTests(AbstractTest):
@@ -526,10 +555,22 @@ class MiscTests(AbstractTest):
         self.assertRaises(jks.util.BadPaddingException, jks.util.strip_pkcs5_padding, b"\x07\x07\x07\x07\x07\x07\x07")
         self.assertRaises(jks.util.BadPaddingException, jks.util.strip_pkcs5_padding, b"\x00\x00\x00\x00\x00\x00\x00\x00")
 
+    def test_add_pkcs7_padding(self):
+        self.assertEqual(jks.util.add_pkcs7_padding(b"", 8),     b"\x08\x08\x08\x08\x08\x08\x08\x08")
+        self.assertEqual(jks.util.add_pkcs7_padding(b"\x01", 8), b"\x01\x07\x07\x07\x07\x07\x07\x07")
+        self.assertEqual(jks.util.add_pkcs7_padding(b"\x01\x02\x03\x04\x05\x06\x07", 8), b"\x01\x02\x03\x04\x05\x06\x07\x01")
+
+        self.assertRaises(ValueError, jks.util.add_pkcs7_padding, b"", -8)   # block size too small
+        self.assertRaises(ValueError, jks.util.add_pkcs7_padding, b"", 0)    # block size too small
+        self.assertRaises(ValueError, jks.util.add_pkcs7_padding, b"", 256)  # block size too large
+
     def test_sun_jce_pbe_decrypt(self):
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\xc4\x20\x59\xac\x54\x03\xc7\xbf", "my_password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 42))
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\xef\x9f\xbd\xc5\x91\x5f\x49\x50", "my_password", b"\x01\x02\x03\x04\x01\x02\x03\x05", 42))
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\x72\x8f\xd8\xcc\x21\x41\x25\x80", "my_password", b"\x01\x02\x03\x04\x01\x02\x03\x04", 42))
+        self.assertRaises(ValueError, jks.sun_crypto.jce_pbe_decrypt, b"\x00\x00\x00\x00\x00\x00\x00\x00", "my_password", b"\x00", 42)   # salt too short
+        self.assertRaises(ValueError, jks.sun_crypto.jce_pbe_decrypt, b"\x00\x00\x00\x00\x00\x00\x00\x00", "my_password", b"\x00"*9, 42) # salt too long
+        self.assertRaises(ValueError, jks.sun_crypto.jce_pbe_decrypt, b"\xc4\x20\x59\xac\x54\x03\xc7\xbf", "my_p\xc3\xa1ssword", b"\x01\x02\x03\x04\x05\x06\x07\x08", 42) # non-ASCII password characters
 
     def test_pkcs12_key_derivation(self):
         self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_MAC_MATERIAL, "", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 16), b"\xe7\x76\x85\x01\x6a\x53\x62\x1e\x9a\x2a\x8a\x0f\x80\x00\x2e\x70")
@@ -610,6 +651,7 @@ class MiscTests(AbstractTest):
         dummy = sk.key
         dummy = sk.key_size
         dummy = sk.algorithm
+        sk.decrypt("wrong_password") # additional decrypt() calls should do nothing
 
         # as applied to private keys
         store = jks.KeyStore.load(KS_PATH + "/jceks/RSA1024.jceks", "12345678", try_decrypt_keys=False)
@@ -624,6 +666,7 @@ class MiscTests(AbstractTest):
         pk = self.find_private_key(store, "mykey")
         self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.RSA1024.private_key, expected.RSA1024.certs)
         dummy = pk.cert_chain
+        pk.decrypt("wrong_password") # additional decrypt() calls should do nothing
 
 if __name__ == "__main__":
     unittest.main()
