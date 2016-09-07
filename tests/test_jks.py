@@ -297,17 +297,17 @@ class BksOnlyTests(AbstractTest):
         self.assertTrue(isinstance(key_entry.encoded, bytes))
         self.assertTrue(key_entry.is_decrypted())
 
-        if key_entry.type == jks.bks.KEY_TYPE_PRIVATE:
+        if key_entry.type == jks.bks.BksKeyEntry.KEY_TYPE_PRIVATE:
             self.assertTrue(isinstance(key_entry.pkey_pkcs8, bytes))
             self.assertTrue(isinstance(key_entry.pkey, bytes))
             self.assertTrue(isinstance(key_entry.algorithm_oid, tuple))
 
-        elif key_entry.type == jks.bks.KEY_TYPE_PUBLIC:
+        elif key_entry.type == jks.bks.BksKeyEntry.KEY_TYPE_PUBLIC:
             self.assertTrue(isinstance(key_entry.public_key_info, bytes))
             self.assertTrue(isinstance(key_entry.public_key, bytes))
             self.assertTrue(isinstance(key_entry.algorithm_oid, tuple))
 
-        elif key_entry.type == jks.bks.KEY_TYPE_SECRET:
+        elif key_entry.type == jks.bks.BksKeyEntry.KEY_TYPE_SECRET:
             self.assertTrue(isinstance(key_entry.key, bytes))
 
         else:
@@ -396,27 +396,27 @@ class BksOnlyTests(AbstractTest):
         sealed_public = store.entries["sealed_public_key"]
         self.check_sealed_key_entry(sealed_public, store_type)
         self.assertTrue(sealed_public.is_decrypted())
-        self.assertEqual(sealed_public.type, jks.bks.KEY_TYPE_PUBLIC)
+        self.assertEqual(sealed_public.type, jks.bks.BksKeyEntry.KEY_TYPE_PUBLIC)
         self.assertEqual(sealed_public.algorithm, "RSA")
         self.assertEqual(sealed_public.algorithm_oid, jks.util.RSA_ENCRYPTION_OID)
         self.assertEqual(sealed_public.public_key_info, expected.bks_christmas.public_key)
 
         sealed_private = store.entries["sealed_private_key"]
         self.check_sealed_key_entry(sealed_private, store_type)
-        self.assertEqual(sealed_private.type, jks.bks.KEY_TYPE_PRIVATE)
+        self.assertEqual(sealed_private.type, jks.bks.BksKeyEntry.KEY_TYPE_PRIVATE)
         self.assertEqual(sealed_private.algorithm, "RSA")
         self.assertTrue(sealed_private.is_decrypted())
         self.check_pkey_and_certs_equal(sealed_private, jks.util.RSA_ENCRYPTION_OID, expected.bks_christmas.private_key, expected.bks_christmas.certs)
 
         sealed_secret = store.entries["sealed_secret_key"]
         self.check_sealed_key_entry(sealed_secret, store_type)
-        self.assertEqual(sealed_secret.type, jks.bks.KEY_TYPE_SECRET)
+        self.assertEqual(sealed_secret.type, jks.bks.BksKeyEntry.KEY_TYPE_SECRET)
         self.assertEqual(sealed_secret.algorithm, "AES")
         self.check_secret_key_equal(sealed_secret, "AES", 128, b"\x3f\x68\x05\x04\xc6\x6c\xc2\x5a\xae\x65\xd0\xfa\x49\xc5\x26\xec")
 
         plain_key = store.entries["plain_key"]
         self.check_plain_key_entry(plain_key, store_type)
-        self.assertEqual(plain_key.type, jks.bks.KEY_TYPE_SECRET)
+        self.assertEqual(plain_key.type, jks.bks.BksKeyEntry.KEY_TYPE_SECRET)
         self.assertEqual(plain_key.algorithm, "DES")
         self.check_secret_key_equal(plain_key, "DES", 64, b"\x4c\xf2\xfe\x91\x5d\x08\x2a\x43")
 

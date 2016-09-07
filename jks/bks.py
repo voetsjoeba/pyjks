@@ -14,9 +14,6 @@ ENTRY_TYPE_CERTIFICATE = 1
 ENTRY_TYPE_KEY = 2            # plaintext key entry as would otherwise be stored inside a sealed entry (type 4); no longer supported at the time of writing (BC 1.54)
 ENTRY_TYPE_SECRET = 3         # for keys that were added to the store in already-protected form; can be arbitrary data
 ENTRY_TYPE_SEALED = 4         # for keys that were protected by the BC keystore implementation upon adding
-KEY_TYPE_PRIVATE = 0          #: Type indicator for private keys in :class:`BksKeyEntry`.
-KEY_TYPE_PUBLIC = 1           #: Type indicator for public keys in :class:`BksKeyEntry`.
-KEY_TYPE_SECRET = 2           #: Type indicator for secret keys in :class:`BksKeyEntry`. Indicates a key for use with a symmetric encryption algorithm.
 
 class AbstractBksEntry(AbstractKeystoreEntry):
     """Abstract superclass for BKS keystore entry types"""
@@ -36,6 +33,10 @@ class BksKeyEntry(AbstractBksEntry):
     May exceptionally appear as a top-level entry type in (very) old keystores, but you are most likely
     to encounter these as the nested object inside a :class:`BksSealedKeyEntry` once decrypted.
     """
+    KEY_TYPE_PRIVATE = 0          #: Type indicator for private keys in :class:`BksKeyEntry`.
+    KEY_TYPE_PUBLIC = 1           #: Type indicator for public keys in :class:`BksKeyEntry`.
+    KEY_TYPE_SECRET = 2           #: Type indicator for secret keys in :class:`BksKeyEntry`. Indicates a key for use with a symmetric encryption algorithm.
+
     def __init__(self, type, format, algorithm, encoded, **kwargs):
         super(BksKeyEntry, self).__init__(**kwargs)
         self.type = type
@@ -47,7 +48,7 @@ class BksKeyEntry(AbstractBksEntry):
         self.encoded = encoded
         """A byte string containing the key, formatted as indicated by the :attr:`format` attribute."""
 
-        if self.type == KEY_TYPE_PRIVATE:
+        if self.type == self.KEY_TYPE_PRIVATE:
             if self.format not in ["PKCS8", "PKCS#8"]:
                 raise UnexpectedKeyEncodingException("Unexpected encoding for private key entry: '%s'" % self.format)
             # self.encoded is a PKCS#8 PrivateKeyInfo
@@ -56,7 +57,7 @@ class BksKeyEntry(AbstractBksEntry):
             self.pkey = private_key_info['privateKey'].asOctets()
             self.algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
 
-        elif self.type == KEY_TYPE_PUBLIC:
+        elif self.type == self.KEY_TYPE_PUBLIC:
             if self.format not in ["X.509", "X509"]:
                 raise UnexpectedKeyEncodingException("Unexpected encoding for public key entry: '%s'" % self.format)
             # self.encoded is an X.509 SubjectPublicKeyInfo
@@ -65,7 +66,7 @@ class BksKeyEntry(AbstractBksEntry):
             self.public_key = bitstring_to_bytes(spki['subjectPublicKey'])
             self.algorithm_oid = spki['algorithm']['algorithm'].asTuple()
 
-        elif self.type == KEY_TYPE_SECRET:
+        elif self.type == self.KEY_TYPE_SECRET:
             if self.format != "RAW":
                 raise UnexpectedKeyEncodingException("Unexpected encoding for raw key entry: '%s'" % self.format)
             # self.encoded is an unwrapped/raw cryptographic key
@@ -91,11 +92,11 @@ class BksKeyEntry(AbstractBksEntry):
 
         :param int t: Key type constant. One of :const:`KEY_TYPE_PRIVATE`, :const:`KEY_TYPE_PUBLIC`, :const:`KEY_TYPE_SECRET`.
         """
-        if t == KEY_TYPE_PRIVATE:
+        if t == cls.KEY_TYPE_PRIVATE:
             return "PRIVATE"
-        elif t == KEY_TYPE_PUBLIC:
+        elif t == cls.KEY_TYPE_PUBLIC:
             return "PUBLIC"
-        elif t == KEY_TYPE_SECRET:
+        elif t == cls.KEY_TYPE_SECRET:
             return "SECRET"
         return None
 

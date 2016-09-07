@@ -54,10 +54,6 @@ encrypting the entire keystore using (a key derived from) the store password.
 Entry types
 -----------
 
-.. automodule:: jks.bks
-    :members: KEY_TYPE_PRIVATE, KEY_TYPE_PUBLIC, KEY_TYPE_SECRET
-    :noindex:
-
 .. autoclass:: BksTrustedCertEntry
     :members:
     :show-inheritance:
