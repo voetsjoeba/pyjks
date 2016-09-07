@@ -26,9 +26,9 @@ def get_entry_metadata(entry):
             result += "  Key type: %s\n" % jks.bks.BksKeyEntry.type2str(entry.type)
             result += "  Key format: %s\n" % (entry.format,)
             result +="  Key algorithm: %s\n" % (entry.algorithm,)
-            if entry.type in [jks.bks.KEY_TYPE_PRIVATE, jks.bks.KEY_TYPE_PUBLIC]:
+            if entry.type in [jks.bks.BksKeyEntry.KEY_TYPE_PRIVATE, jks.bks.BksKeyEntry.KEY_TYPE_PUBLIC]:
                 result += "  Key algorithm OID: %s\n" % (entry.algorithm_oid,)
-            elif entry.type == jks.bks.KEY_TYPE_SECRET:
+            elif entry.type == jks.bks.BksKeyEntry.KEY_TYPE_SECRET:
                 result += "  Key size: %d bits\n" % (entry.key_size,)
         if isinstance(entry, jks.TrustedCertEntry) or \
            isinstance(entry, jks.bks.TrustedCertEntry):
@@ -50,14 +50,14 @@ def get_entry_bits(entry):
 
     if isinstance(entry, jks.bks.BksKeyEntry) or \
        isinstance(entry, jks.bks.BksSealedKeyEntry):
-        if entry.type == jks.bks.KEY_TYPE_PRIVATE:
+        if entry.type == jks.bks.BksKeyEntry.KEY_TYPE_PRIVATE:
             result = pkey_as_pem(entry)
             for c in entry.cert_chain:
                 result += "\n" + as_pem(c.cert, "CERTIFICATE")
             return result
-        elif entry.type == jks.bks.KEY_TYPE_PUBLIC:
+        elif entry.type == jks.bks.BksKeyEntry.KEY_TYPE_PUBLIC:
             return as_pem(entry.public_key_info, "PUBLIC KEY")
-        elif entry.type == jks.bks.KEY_TYPE_SECRET:
+        elif entry.type == jks.bks.BksKeyEntry.KEY_TYPE_SECRET:
             return base64.b64encode(entry.key)
 
     if isinstance(entry, jks.bks.BksSecretKeyEntry):
