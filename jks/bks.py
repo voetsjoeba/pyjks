@@ -4,16 +4,9 @@ import hashlib
 from pyasn1.codec.ber import decoder
 from pyasn1_modules import rfc5208, rfc2459
 from Crypto.Hash import HMAC, SHA
-
 from .util import *
 from .jks import KeyStore, TrustedCertEntry
 from . import rfc7292
-
-
-ENTRY_TYPE_CERTIFICATE = 1
-ENTRY_TYPE_KEY = 2            # plaintext key entry as would otherwise be stored inside a sealed entry (type 4); no longer supported at the time of writing (BC 1.54)
-ENTRY_TYPE_SECRET = 3         # for keys that were added to the store in already-protected form; can be arbitrary data
-ENTRY_TYPE_SEALED = 4         # for keys that were protected by the BC keystore implementation upon adding
 
 class AbstractBksEntry(AbstractKeystoreEntry):
     """Abstract superclass for BKS keystore entry types"""
@@ -214,6 +207,11 @@ class BksKeyStore(AbstractKeystore):
     """
     Bouncycastle "BKS" keystore parser. Supports both the current V2 and old V1 formats.
     """
+    ENTRY_TYPE_CERTIFICATE = 1
+    ENTRY_TYPE_KEY = 2            # plaintext key entry as would otherwise be stored inside a sealed entry (type 4); no longer supported at the time of writing (BC 1.54)
+    ENTRY_TYPE_SECRET = 3         # for keys that were added to the store in already-protected form; can be arbitrary data
+    ENTRY_TYPE_SEALED = 4         # for keys that were protected by the BC keystore implementation upon adding
+
     def __init__(self, store_type, entries, version=2):
         super(BksKeyStore, self).__init__(store_type, entries)
         self.version = version
@@ -318,13 +316,13 @@ class BksKeyStore(AbstractKeystore):
                 entry, pos = cls._read_bks_cert(data, pos, store_type)
                 cert_chain.append(entry)
 
-            if _type == 1: # certificate
+            if _type == cls.ENTRY_TYPE_CERTIFICATE: # certificate
                 entry, pos = cls._read_bks_cert(data, pos, store_type)
-            elif _type == 2: # key: plaintext key entry, i.e. same as sealed key but without the PBEWithSHAAnd3KeyTripleDESCBC layer
+            elif _type == cls.ENTRY_TYPE_KEY:       # key: plaintext key entry, i.e. same as sealed key but without the PBEWithSHAAnd3KeyTripleDESCBC layer
                 entry, pos = cls._read_bks_key(data, pos, store_type)
-            elif _type == 3: # secret key: opaque arbitrary data blob, stored as-is by the keystore; can be anything (assumed to already be protected when supplied).
+            elif _type == cls.ENTRY_TYPE_SECRET:    # secret key: opaque arbitrary data blob, stored as-is by the keystore; can be anything (assumed to already be protected when supplied).
                 entry, pos = cls._read_bks_secret(data, pos, store_type)
-            elif _type == 4: # sealed key; a well-formatted certificate, private key or public key, encrypted by the BKS implementation with a standard algorithm at save time
+            elif _type == cls.ENTRY_TYPE_SEALED:    # sealed key; a well-formatted certificate, private key or public key, encrypted by the BKS implementation with a standard algorithm at save time
                 entry, pos = cls._read_bks_sealed(data, pos, store_type)
             else:
                 raise BadKeystoreFormatException("Unexpected keystore entry type %d", tag)
