@@ -126,6 +126,8 @@ class AbstractKeystore(object):
     def _write_utf(cls, text):
         encoded_text = text.encode('utf-8')
         size = len(encoded_text)
+        if size > 0xFFFF:
+            raise BadDataLengthException("Cannot write UTF-8 data; length exceeds maximum size")
         result = b2.pack(size)
         result += encoded_text
         return result
@@ -133,6 +135,8 @@ class AbstractKeystore(object):
     @classmethod
     def _write_data(cls, data):
         size = len(data)
+        if size > 0xFFFFFFFF:
+            raise BadDataLengthException("Cannot write binary data; length exceeds maximum size")
         result = b4.pack(size)
         result += data
         return result

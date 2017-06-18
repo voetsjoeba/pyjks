@@ -24,7 +24,6 @@ try:
 except:
     long = int
 
-
 class AbstractTest(unittest.TestCase):
     def find_private_key(self, ks, alias):
         pk = ks.entries[alias]
@@ -197,6 +196,12 @@ class JksTests(AbstractTest):
         pk = self.find_private_key(store2, u'\xe6\xe6\xe6\xf8\xf8\xf8\xe5\xe5\xf8\xe6')
         self.assertEqual(store2.store_type, "jks")
         self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.RSA1024.private_key, expected.RSA1024.certs)
+
+    def test_create_and_load_oversized_alias(self):
+        oversized_alias = "a"*(0xFFFF+1)
+        entry = jks.PrivateKeyEntry.new(oversized_alias, expected.RSA1024.certs, expected.RSA1024.private_key)
+        store = jks.KeyStore.new('jks', [entry])
+        self.assertRaises(jks.util.BadDataLengthException, store.saves, "12345678")
 
     def test_create_and_load_custom_entry_passwords(self):
         cert = jks.PrivateKeyEntry.new('mykey', expected.custom_entry_passwords.certs, expected.custom_entry_passwords.private_key)
