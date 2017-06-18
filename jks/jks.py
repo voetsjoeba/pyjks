@@ -100,7 +100,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         super(PrivateKeyEntry, self).__init__(**kwargs)
         self.cert_chain = kwargs.get("cert_chain")
         """
-        A list of tuples, representing the certificate chain associated with the private key. Each element of the list of a 2-tuple
+        A list of tuples, representing the certificate chain associated with the private key. Each element of the list is a 2-tuple
         containing the following data:
 
             - ``[0]``: A string indicating the type of certificate. Unless in exotic applications, this is usually ``X.509``.
@@ -329,7 +329,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         # (i.e. other than SecretKeySpec) implement a writeReplace()
         # method, causing Java's serialization runtime to swap out the
         # object for a completely different one at serialization time.
-        # Again for SunJCE, the subsitute object that gets serialized
+        # Again for SunJCE, the substitute object that gets serialized
         # is usually a java.security.KeyRep object.
         obj, dummy = KeyStore._read_java_obj(plaintext, 0)
         clazz = obj.get_class()
