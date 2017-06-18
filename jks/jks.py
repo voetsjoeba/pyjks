@@ -375,6 +375,9 @@ class KeyStore(AbstractKeystore):
     """
     Represents a loaded JKS or JCEKS keystore.
     """
+    ENTRY_TYPE_PRIVATE_KEY = 1
+    ENTRY_TYPE_CERTIFICATE = 2
+    ENTRY_TYPE_SECRET_KEY = 3
 
     @classmethod
     def new(cls, store_type, store_entries):
@@ -503,11 +506,11 @@ class KeyStore(AbstractKeystore):
                 alias, pos = cls._read_utf(data, pos, kind="entry alias")
                 timestamp = int(b8.unpack_from(data, pos)[0]); pos += 8 # milliseconds since UNIX epoch
 
-                if tag == 1:
+                if tag == cls.ENTRY_TYPE_PRIVATE_KEY:
                     entry, pos = cls._read_private_key(data, pos, store_type)
-                elif tag == 2:
+                elif tag == cls.ENTRY_TYPE_CERTIFICATE:
                     entry, pos = cls._read_trusted_cert(data, pos, store_type)
-                elif tag == 3:
+                elif tag == cls.ENTRY_TYPE_SECRET_KEY:
                     if store_type != "jceks":
                         raise BadKeystoreFormatException("Unexpected entry tag {0} encountered in JKS keystore; only supported in JCEKS keystores".format(tag))
                     entry, pos = cls._read_secret_key(data, pos, store_type)
@@ -701,7 +704,7 @@ class KeyStore(AbstractKeystore):
 
     @classmethod
     def _write_private_key(cls, alias, item, key_password):
-        private_key_entry = b4.pack(1) # private key
+        private_key_entry = b4.pack(cls.ENTRY_TYPE_PRIVATE_KEY)
         private_key_entry += cls._write_utf(alias)
         private_key_entry += b8.pack(item.timestamp)
         item.encrypt(key_password)
@@ -716,7 +719,7 @@ class KeyStore(AbstractKeystore):
 
     @classmethod
     def _write_trusted_cert(cls, alias, item):
-        trusted_cert = b4.pack(2) # trusted cert
+        trusted_cert = b4.pack(cls.ENTRY_TYPE_CERTIFICATE)
         trusted_cert += cls._write_utf(alias)
         trusted_cert += b8.pack(item.timestamp)
         trusted_cert += cls._write_utf('X.509')
