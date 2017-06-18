@@ -157,7 +157,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
             private_key_info.setComponentByName('version','v1')
             a = AlgorithmIdentifier()
             a.setComponentByName('algorithm', pke._algorithm_oid)
-            a.setComponentByName('parameters', '\x05\x00')
+            a.setComponentByName('parameters', univ.Null())
             private_key_info.setComponentByName('privateKeyAlgorithm', a)
             private_key_info.setComponentByName('privateKey', key)
 
@@ -240,7 +240,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
 
         a = AlgorithmIdentifier()
         a.setComponentByName('algorithm', sun_crypto.SUN_JKS_ALGO_ID)
-        a.setComponentByName('parameters', '\x05\x00')
+        a.setComponentByName('parameters', univ.Null())
         epki = rfc5208.EncryptedPrivateKeyInfo()
         epki.setComponentByName('encryptionAlgorithm',a)
         epki.setComponentByName('encryptedData', encrypted_private_key)
