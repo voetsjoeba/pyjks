@@ -547,30 +547,6 @@ class KeyStore(AbstractKeystore):
 
         return cls(store_type, entries)
 
-    @classmethod
-    def _write_private_key(cls, alias, item, key_password):
-        private_key_entry = b4.pack(1) # private key
-        private_key_entry += cls._write_utf(alias)
-        private_key_entry += b8.pack(item.timestamp)
-        item.encrypt(key_password)
-        private_key_entry += cls._write_data(item._encrypted)
-
-        private_key_entry += b4.pack(len(item.cert_chain))
-        for cert in item.cert_chain:
-            private_key_entry += cls._write_utf(cert[0])
-            private_key_entry += cls._write_data(cert[1])
-
-        return private_key_entry
-
-    @classmethod
-    def _write_trusted_cert(cls, alias, item):
-        trusted_cert = b4.pack(2) # trusted cert
-        trusted_cert += cls._write_utf(alias)
-        trusted_cert += b8.pack(item.timestamp)
-        trusted_cert += cls._write_utf('X.509')
-        trusted_cert += cls._write_data(item.cert)
-        return trusted_cert
-
     def saves(self, store_password):
         """
         Saves the keystore so that it can be read by other applications.
@@ -722,3 +698,28 @@ class KeyStore(AbstractKeystore):
         obj_size = data_stream.tell()
 
         return obj, pos + obj_size
+
+    @classmethod
+    def _write_private_key(cls, alias, item, key_password):
+        private_key_entry = b4.pack(1) # private key
+        private_key_entry += cls._write_utf(alias)
+        private_key_entry += b8.pack(item.timestamp)
+        item.encrypt(key_password)
+        private_key_entry += cls._write_data(item._encrypted)
+
+        private_key_entry += b4.pack(len(item.cert_chain))
+        for cert in item.cert_chain:
+            private_key_entry += cls._write_utf(cert[0])
+            private_key_entry += cls._write_data(cert[1])
+
+        return private_key_entry
+
+    @classmethod
+    def _write_trusted_cert(cls, alias, item):
+        trusted_cert = b4.pack(2) # trusted cert
+        trusted_cert += cls._write_utf(alias)
+        trusted_cert += b8.pack(item.timestamp)
+        trusted_cert += cls._write_utf('X.509')
+        trusted_cert += cls._write_data(item.cert)
+        return trusted_cert
+
