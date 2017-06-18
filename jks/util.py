@@ -261,15 +261,17 @@ def java_is_subclass(obj, class_name):
 
 def java_bytestring(java_byte_list):
     """Convert the value returned by javaobj for a byte[] to a byte
-    string.  Java's bytes are signed and numeric (i.e. not chars),
-    so javaobj returns Java byte arrays as a list of Python
-    integers in the range [-128, 127].
+    string (i.e. a 'bytes' instance):
+      - Prior to version 0.2.3, javaobj returns Java byte arrays
+        as a list of Python integers in the range [-128, 127].
+      - As of 0.2.3+, javaobj returns a bytes instance.
 
-    For ease of use we want to get a byte string representation of
-    that, so we reinterpret each integer as an unsigned byte, take
-    its new value as another Python int (now remapped to the range
-    [0, 255]), and use struct.pack() to create the matching byte
-    string.
+    In case of a <0.2.3 integer list, reinterpret each integer as
+    an unsigned byte, take its new value as another Python int
+    (now remapped to the range [0, 255]), and use struct.pack() to
+    create the matching byte string.
     """
+    if isinstance(java_byte_list, bytes):
+        return java_byte_list
     args = [ctypes.c_ubyte(sb).value for sb in java_byte_list]
     return struct.pack("%dB" % len(java_byte_list), *args)
