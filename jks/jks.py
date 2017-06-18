@@ -27,7 +27,6 @@ return individual elements as an 'int'.
 
 from __future__ import print_function
 import struct
-import ctypes
 import hashlib
 import javaobj
 import time
@@ -335,12 +334,12 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         clazz = obj.get_class()
         if clazz.name == "javax.crypto.spec.SecretKeySpec":
             algorithm = obj.algorithm
-            key = KeyStore._java_bytestring(obj.key)
+            key = java_bytestring(obj.key)
             key_size = len(key)*8
 
         elif clazz.name == "java.security.KeyRep":
             assert (obj.type.constant == "SECRET"), "Expected value 'SECRET' for KeyRep.type enum value, found '%s'" % obj.type.constant
-            key_bytes = KeyStore._java_bytestring(obj.encoded)
+            key_bytes = java_bytestring(obj.encoded)
             key_encoding = obj.format
             if key_encoding == "RAW":
                 pass # ok, no further processing needed
@@ -705,13 +704,13 @@ class KeyStore(AbstractKeystore):
         #   protected byte[] encodedParams;          # The cryptographic parameters used by the sealing Cipher, encoded in the default format.
 
         sealed_obj, pos = cls._read_java_obj(data, pos, ignore_remaining_data=True)
-        if not cls._java_is_subclass(sealed_obj, "javax.crypto.SealedObject"):
+        if not java_is_subclass(sealed_obj, "javax.crypto.SealedObject"):
             raise UnexpectedJavaTypeException("Unexpected sealed object type '%s'; not a subclass of javax.crypto.SealedObject" % sealed_obj.get_class().name)
 
         if sealed_obj.encryptedContent:
-            sealed_obj.encryptedContent = cls._java_bytestring(sealed_obj.encryptedContent)
+            sealed_obj.encryptedContent = java_bytestring(sealed_obj.encryptedContent)
         if sealed_obj.encodedParams:
-            sealed_obj.encodedParams = KeyStore._java_bytestring(sealed_obj.encodedParams)
+            sealed_obj.encodedParams = java_bytestring(sealed_obj.encodedParams)
 
         entry = SecretKeyEntry(sealed_obj=sealed_obj, store_type=store_type)
         return entry, pos
@@ -723,31 +722,3 @@ class KeyStore(AbstractKeystore):
         obj_size = data_stream.tell()
 
         return obj, pos + obj_size
-
-    @classmethod
-    def _java_is_subclass(cls, obj, class_name):
-        """Given a deserialized JavaObject as returned by the javaobj library,
-        determine whether it's a subclass of the given class name.
-        """
-        clazz = obj.get_class()
-        while clazz:
-            if clazz.name == class_name:
-                return True
-            clazz = clazz.superclass
-        return False
-
-    @classmethod
-    def _java_bytestring(cls, java_byte_list):
-        """Convert the value returned by javaobj for a byte[] to a byte
-        string.  Java's bytes are signed and numeric (i.e. not chars),
-        so javaobj returns Java byte arrays as a list of Python
-        integers in the range [-128, 127].
-
-        For ease of use we want to get a byte string representation of
-        that, so we reinterpret each integer as an unsigned byte, take
-        its new value as another Python int (now remapped to the range
-        [0, 255]), and use struct.pack() to create the matching byte
-        string.
-        """
-        args = [ctypes.c_ubyte(sb).value for sb in java_byte_list]
-        return struct.pack("%dB" % len(java_byte_list), *args)

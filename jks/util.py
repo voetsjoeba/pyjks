@@ -3,6 +3,7 @@ from __future__ import print_function
 import textwrap
 import base64
 import struct
+import ctypes
 
 b8 = struct.Struct('>Q')
 b4 = struct.Struct('>L') # unsigned
@@ -242,3 +243,29 @@ def add_pkcs7_padding(m, block_size):
     num_padding_bytes = block_size - (len(m) % block_size)
     m = m + bytearray([num_padding_bytes]*num_padding_bytes)
     return bytes(m)
+
+def java_is_subclass(obj, class_name):
+    """Given a deserialized JavaObject as returned by the javaobj library,
+    determine whether it's a subclass of the given class name.
+    """
+    clazz = obj.get_class()
+    while clazz:
+        if clazz.name == class_name:
+            return True
+        clazz = clazz.superclass
+    return False
+
+def java_bytestring(java_byte_list):
+    """Convert the value returned by javaobj for a byte[] to a byte
+    string.  Java's bytes are signed and numeric (i.e. not chars),
+    so javaobj returns Java byte arrays as a list of Python
+    integers in the range [-128, 127].
+
+    For ease of use we want to get a byte string representation of
+    that, so we reinterpret each integer as an unsigned byte, take
+    its new value as another Python int (now remapped to the range
+    [0, 255]), and use struct.pack() to create the matching byte
+    string.
+    """
+    args = [ctypes.c_ubyte(sb).value for sb in java_byte_list]
+    return struct.pack("%dB" % len(java_byte_list), *args)
