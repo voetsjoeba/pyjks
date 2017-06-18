@@ -384,7 +384,7 @@ class JceTests(AbstractTest):
     def test_duplicate_aliases(self):
         self.assertRaises(jks.DuplicateAliasException, jks.KeyStore.load, KS_PATH + "/jceks/duplicate_aliases.jceks", "12345678")
 
-class JceOnlyTests(AbstractTest):
+class JceSecretKeyTests(AbstractTest):
     def test_des_secret_key(self):
         store = jks.KeyStore.load(KS_PATH + "/jceks/DES.jceks", "12345678")
         sk = self.find_secret_key(store, "mykey")
