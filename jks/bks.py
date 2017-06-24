@@ -67,7 +67,7 @@ class BksKeyEntry(AbstractBksEntry):
             self.key_size = len(encoded)*8
 
         else:
-            raise UnexpectedKeyEncodingException("Key format '%s' not recognized" % self.format)
+            raise UnexpectedKeyEncodingException("Key type %r not recognized" % (self.type,))
 
     def is_decrypted(self):
         """Always returns ``True`` for this entry type."""
