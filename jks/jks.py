@@ -437,10 +437,13 @@ class KeyStore(AbstractKeystore):
         keystore += b4.pack(len(self.entries))
 
         for alias, entry in self.entries.items():
+            # TODO: verify that entry.alias == alias (some smart ass might change the .alias on the entry after it has been inserted under key 'alias' in the store)
+            entry.encrypt(store_password)
+
             if isinstance(entry, TrustedCertEntry):
                 keystore += self._write_trusted_cert_entry(entry)
             elif isinstance(entry, PrivateKeyEntry):
-                keystore += self._write_private_key_entry(entry, store_password)
+                keystore += self._write_private_key_entry(entry)
             elif isinstance(entry, SecretKeyEntry):
                 if self.store_type != 'jceks':
                     raise UnsupportedKeystoreEntryTypeException('Secret Key only allowed in JCEKS keystores')
@@ -556,10 +559,9 @@ class KeyStore(AbstractKeystore):
         return obj, pos + obj_size
 
     @classmethod
-    def _write_private_key_entry(cls, entry, key_password):
+    def _write_private_key_entry(cls, entry):
         result = b4.pack(cls.ENTRY_TYPE_PRIVATE_KEY)
         result += cls._write_alias_and_timestamp(entry.alias, entry.timestamp)
-        entry.encrypt(key_password)
         result += cls._write_data(entry._encrypted_form)
 
         result += b4.pack(len(entry.certs))
