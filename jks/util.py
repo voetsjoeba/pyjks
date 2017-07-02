@@ -4,6 +4,7 @@ import textwrap
 import base64
 import struct
 import ctypes
+import javaobj
 
 b8 = struct.Struct('>Q')
 b4 = struct.Struct('>L') # unsigned
@@ -177,7 +178,7 @@ def java_is_subclass(obj, class_name):
         clazz = clazz.superclass
     return False
 
-def java_bytestring(java_byte_list):
+def java2bytes(java_byte_list):
     """Convert the value returned by javaobj for a byte[] to a byte
     string (i.e. a 'bytes' instance):
       - Prior to version 0.2.3, javaobj returns Java byte arrays
@@ -193,3 +194,24 @@ def java_bytestring(java_byte_list):
         return java_byte_list
     args = [ctypes.c_ubyte(sb).value for sb in java_byte_list]
     return struct.pack("%dB" % len(java_byte_list), *args)
+
+_classdesc_ByteArray = None
+def bytes2java(bytez):
+    """
+    Converts a Python 'bytes' object to javaobj's representation of a byte[]
+    """
+    global _classdesc_ByteArray
+    if not _classdesc_ByteArray:
+        _classdesc_ByteArray = javaobj.JavaClass()
+        _classdesc_ByteArray.name = "[B"
+        _classdesc_ByteArray.serialVersionUID = -5984413125824719648
+        _classdesc_ByteArray.flags = javaobj.JavaObjectConstants.SC_SERIALIZABLE
+
+    data = [ctypes.c_byte(b).value for b in bytearray(bytez)] # convert a Python bytes/bytearray instance to an array of signed integers
+
+    array_obj = javaobj.JavaArray()
+    array_obj.classdesc = _classdesc_ByteArray
+    array_obj.extend(data)
+
+    return array_obj
+
