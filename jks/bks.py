@@ -237,6 +237,52 @@ class BksKeyStore(AbstractKeystore):
         self.version = version
         """Version of the keystore format, if loaded."""
 
+    def __init__(self, store_type, entries=None, version=2):
+        super(BksKeyStore, self).__init__(store_type)
+        self.version = version
+        if store_type not in ['bks']:
+            raise UnsupportedKeystoreTypeException("The Keystore Type '%s' is not supported" % store_type)
+
+        self.entries = {}
+        self.add_entries(entries or [])
+
+    def make_entry(self, alias, item, timestamp=None):
+        """
+        Creates and returns a new Entry suitable for insertion into keystores of this type.
+        """
+        if timestamp is None:
+            timestamp = int(time.time())*1000
+
+        entry = None
+        if isinstance(item, BksKey):
+            # BksKeys can get wrapped by either a BksSealedKeyEntry or a BksKeyEntry, but BksKeyEntries are unencrypted and no longer supported,
+            # so clearly we want to create BksSealedKeyEntries for these
+            entry = BksSealedKeyEntry(alias, timestamp, self.store_type, item)
+        elif isinstance(item, (PrivateKey, PublicKey, SecretKey)):
+            bkskey = BksKey.create_from(item)
+            entry = BksSealedKeyEntry(alias, timestamp, self.store_type, bkskey)
+        elif isinstance(item, TrustedCertificate):
+            entry = BksTrustedCertEntry(alias, timestamp, self.store_type, item)
+        else:
+            raise Exception("Don't know how to make an Entry for storing objects of type '%s' into a keystore ..." % type(item))
+
+        return entry
+
+    def add_entry(self, new_entry):
+        if not isinstance(new_entry, AbstractBksEntry):
+            raise UnsupportedKeystoreEntryTypeException("This method takes entry objects, not plaintext keys/certificates or otherwise. Use .make_entry() to wrap a plaintext key/certificate in an appropriate entry object first.")
+
+        valid_entry_types = (BksTrustedCertEntry, BksKeyEntry, BksSecretKeyEntry, BksSealedKeyEntry)
+        if not isinstance(new_entry, valid_entry_types):
+            raise UnsupportedKeystoreEntryTypeException("%s keystores cannot store entries of type '%s' -- must be one of %s" % (self.store_type.upper(), type(new_entry).__name__, [t.__name__ for t in valid_entry_types]))
+
+        alias = new_entry.alias
+        if alias in self.entries:
+            raise DuplicateAliasException("Found duplicate alias: '%s'" % alias)
+
+        self.entries[alias] = new_entry
+
+    # TODO: rename to cert_entries
     @property
     def cert_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
@@ -244,6 +290,7 @@ class BksKeyStore(AbstractKeystore):
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, BksTrustedCertEntry)])
 
+    # TODO: rename to secret_key_entries
     @property
     def secret_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
@@ -251,6 +298,7 @@ class BksKeyStore(AbstractKeystore):
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, BksSecretKeyEntry)])
 
+    # TODO: rename to sealed_key_entries
     @property
     def sealed_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
@@ -258,6 +306,7 @@ class BksKeyStore(AbstractKeystore):
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, BksSealedKeyEntry)])
 
+    # TODO: rename to plain_key_entries
     @property
     def plain_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
@@ -313,14 +362,15 @@ class BksKeyStore(AbstractKeystore):
             computed_hmac = hmac.digest()
             if store_hmac != computed_hmac:
                 raise KeystoreSignatureException("Hash mismatch; incorrect keystore password?")
-            return cls(store_type, entries, version=version)
+
+            return cls(store_type, entries=entries, version=version)
 
         except struct.error as e:
             raise BadKeystoreFormatException(e)
 
     @classmethod
     def _load_bks_entries(cls, data, store_type, store_password, try_decrypt_keys=False):
-        entries = {}
+        entries = []
         pos = 0
         while pos < len(data):
             _type = b1.unpack_from(data, pos)[0]; pos += 1
@@ -345,9 +395,7 @@ class BksKeyStore(AbstractKeystore):
                 except DecryptionFailureException:
                     pass # ok, let user call .decrypt() manually afterwards
 
-            if entry.alias in entries:
-                raise DuplicateAliasException("Found duplicate alias '%s'" % entry.alias)
-            entries[entry.alias] = entry
+            entries.append(entry)
 
         return (entries, pos)
 
@@ -405,6 +453,15 @@ class UberKeyStore(BksKeyStore):
     """
     BouncyCastle "UBER" keystore format parser.
     """
+    def __init__(self, store_type, entries=None, version=2):
+        super(BksKeyStore, self).__init__(store_type)
+        self.version = version
+        if store_type not in ['uber']:
+            raise UnsupportedKeystoreTypeException("The Keystore Type '%s' is not supported" % store_type)
+
+        self.entries = {}
+        self.add_entries(entries or [])
+
     @classmethod
     def loads(cls, data, store_password, try_decrypt_keys=True):
         """
@@ -466,12 +523,8 @@ class UberKeyStore(BksKeyStore):
 
             store_type = "uber"
             entries, size = cls._load_bks_entries(bks_store, store_type, store_password, try_decrypt_keys=try_decrypt_keys)
-            return cls(store_type, entries, version=version)
+            return cls(store_type, entries=entries, version=version)
 
         except struct.error as e:
             raise BadKeystoreFormatException(e)
 
-    def __init__(self, store_type, entries, version=1):
-        super(UberKeyStore, self).__init__(store_type, entries, version=version)
-        self.version = version # only here so Sphinx documents the field
-        """Version of the keystore format, if loaded."""

@@ -357,44 +357,49 @@ class KeyStore(AbstractKeystore):
     ENTRY_TYPE_CERTIFICATE = 2
     ENTRY_TYPE_SECRET_KEY = 3
 
-    @classmethod
-    def new(cls, store_type, store_entries):
-        """
-        Helper function to create a new KeyStore.
-
-        :param string store_type: What kind of keystore
-          the store should be. Valid options are jks or jceks.
-        :param list store_entries: Existing entries that
-          should be added to the keystore.
-
-        :returns: A loaded :class:`KeyStore` instance,
-          with the specified entries.
-
-        :raises DuplicateAliasException: If some of the
-          entries have the same alias.
-        :raises UnsupportedKeyStoreTypeException: If the keystore is of
-          an unsupported type
-        :raises UnsupportedKeyStoreEntryTypeException: If some
-          of the keystore entries are unsupported (in this keystore type)
-        """
+    def __init__(self, store_type, entries=None):
+        super(KeyStore, self).__init__(store_type)
         if store_type not in ['jks', 'jceks']:
             raise UnsupportedKeystoreTypeException("The Keystore Type '%s' is not supported" % store_type)
 
-        entries = {}
-        for entry in store_entries:
-            if not isinstance(entry, AbstractKeystoreEntry):
-                raise UnsupportedKeystoreEntryTypeException("Entries must be a KeyStore Entry")
+        self.entries = {}
+        self.add_entries(entries or [])
 
-            if store_type != 'jceks' and isinstance(entry, SecretKeyEntry):
-                raise UnsupportedKeystoreEntryTypeException('Secret Key only allowed in JCEKS keystores')
+    def make_entry(self, alias, item, timestamp=None):
+        """
+        Creates and returns a new Entry suitable for insertion into keystores of this type.
+        """
+        if timestamp is None:
+            timestamp = int(time.time())*1000
 
-            alias = entry.alias
+        entry = None
+        if isinstance(item, PrivateKey):
+            entry = PrivateKeyEntry(alias, timestamp, self.store_type, item)
+        elif isinstance(item, SecretKey):
+            entry = SecretKeyEntry(alias, timestamp, self.store_type, item)
+        elif isinstance(item, TrustedCertificate):
+            entry = TrustedCertEntry(alias, timestamp, self.store_type, item)
+        else:
+            raise Exception("Don't know how to make an Entry for storing objects of type '%s' into a keystore ..." % type(item))
 
-            if alias in entries:
-                raise DuplicateAliasException("Found duplicate alias '%s'" % alias)
-            entries[alias] = entry
+        return entry
 
-        return cls(store_type, entries)
+    def add_entry(self, new_entry):
+        if not isinstance(new_entry, AbstractKeystoreEntry):
+            raise UnsupportedKeystoreEntryTypeException("This method takes entry objects, not plaintext keys/certificates or otherwise. Use .make_entry() to wrap a plaintext key/certificate in an appropriate entry object first.")
+
+        valid_entry_types = (TrustedCertEntry, PrivateKeyEntry, SecretKeyEntry)
+        if not isinstance(new_entry, valid_entry_types):
+            raise UnsupportedKeystoreEntryTypeException("%s keystores cannot store entries of type '%s' -- must be one of %s" % (self.store_type.upper(), type(new_entry).__name__, [t.__name__ for t in valid_entry_types]))
+
+        if self.store_type != "jceks" and isinstance(new_entry, SecretKeyEntry):
+            raise UnsupportedKeystoreEntryTypeException("%s keystores cannot store entries of type '%s' -- only supported in JCEKS stores" % (self.store_type.upper(), type(new_entry).__name__))
+
+        alias = new_entry.alias
+        if alias in self.entries:
+            raise DuplicateAliasException("Found duplicate alias: '%s'" % alias)
+
+        self.entries[alias] = new_entry
 
     @classmethod
     def loads(cls, data, store_password, try_decrypt_keys=True):
@@ -468,6 +473,7 @@ class KeyStore(AbstractKeystore):
             raise BadKeystoreFormatException('Not a JKS or JCEKS keystore'
                                              ' (magic number wrong; expected'
                                              ' FEEDFEED or CECECECE)')
+        store = cls(store_type)
 
         try:
             version = b4.unpack_from(data, 4)[0]
@@ -500,9 +506,7 @@ class KeyStore(AbstractKeystore):
                     except DecryptionFailureException:
                         pass # ok, let user call decrypt() manually
 
-                if entry.alias in entries:
-                    raise DuplicateAliasException("Found duplicate alias '%s'" % entry.alias)
-                entries[entry.alias] = entry
+                store.add_entries([entry])
 
         except struct.error as e:
             raise BadKeystoreFormatException(e)
@@ -522,7 +526,7 @@ class KeyStore(AbstractKeystore):
         if expected_hash != found_hash:
             raise KeystoreSignatureException("Hash mismatch; incorrect keystore password?")
 
-        return cls(store_type, entries)
+        return store
 
     def saves(self, store_password):
         """
@@ -552,6 +556,7 @@ class KeyStore(AbstractKeystore):
         keystore += b4.pack(2) # version 2
         keystore += b4.pack(len(self.entries))
 
+        # TODO: which alias is the authoritative one? the one in the dict or the one in the entry?
         for alias, entry in self.entries.items():
             # TODO: verify that entry.alias == alias (some smart ass might change the .alias on the entry after it has been inserted under key 'alias' in the store)
             entry.encrypt(store_password)
@@ -573,9 +578,6 @@ class KeyStore(AbstractKeystore):
         keystore += hash
 
         return keystore
-
-    def __init__(self, store_type, entries):
-        super(KeyStore, self).__init__(store_type, entries)
 
     @property
     def cert_entries(self):

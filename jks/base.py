@@ -67,9 +67,28 @@ class AbstractKeystore(object):
     """
     Abstract superclass for keystores.
     """
-    def __init__(self, store_type, entries):
+    def __init__(self, store_type):
         self.store_type = store_type  #: A string indicating the type of keystore that was loaded.
-        self.entries = dict(entries)  #: A dictionary of all entries in the keystore, mapped by alias.
+        self._entries = {}
+        #self.entries = dict(entries or {})  #: A dictionary of all entries in the keystore, mapped by alias.
+
+    def make_entry(self, alias, item, timestamp=None):
+        raise NotImplementedError("Abstract method")
+
+    def make_entries(self, alias_item_pairs):
+        if isinstance(alias_item_pairs, dict):
+            alias_item_pairs = alias_item_pairs.items()
+        result = []
+        for a,i in alias_item_pairs:
+            result.append(self.make_entry(a,i))
+        return result
+
+    def add_entry(self, new_entry):
+        raise NotImplementedError("Abstract method")
+
+    def add_entries(self, new_entries):
+        for e in new_entries:
+            self.add_entry(e)
 
     @classmethod
     def load(cls, filename, store_password, try_decrypt_keys=True):
