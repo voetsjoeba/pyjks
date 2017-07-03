@@ -216,6 +216,54 @@ class JksAndJceksLoadTests(AbstractTest):
         self.assertEqual(store.store_type, "jks")
         self.check_pkey_and_certs_equal(pke.item, jks.util.RSA_ENCRYPTION_OID, expected.jks_non_ascii_password.private_key, expected.jks_non_ascii_password.certs)
 
+class JceSecretKeyLoadTests(AbstractTest):
+    """
+    Tests specifically involving reading SecretKeys in JCEKS keystores
+    """
+    def test_des_secret_key(self):
+        store = jks.KeyStore.load(KS_PATH + "/jceks/DES.jceks", "12345678")
+        ske = self.find_secret_key_entry(store, "mykey")
+        self.assertEqual(store.store_type, "jceks")
+        self.check_secret_key_equal(ske.item, "DES", b"\x4c\xf2\xfe\x91\x5d\x08\x2a\x43")
+
+    def test_desede_secret_key(self):
+        store = jks.KeyStore.load(KS_PATH + "/jceks/DESede.jceks", "12345678")
+        ske = self.find_secret_key_entry(store, "mykey")
+        self.assertEqual(store.store_type, "jceks")
+        self.check_secret_key_equal(ske.item, "DESede", b"\x67\x5e\x52\x45\xe9\x67\x3b\x4c\x8f\xc1\x94\xce\xec\x43\x3b\x31\x8c\x45\xc2\xe0\x67\x5e\x52\x45")
+
+    def test_aes128_secret_key(self):
+        store = jks.KeyStore.load(KS_PATH + "/jceks/AES128.jceks", "12345678")
+        ske = self.find_secret_key_entry(store, "mykey")
+        self.assertEqual(store.store_type, "jceks")
+        self.check_secret_key_equal(ske.item, "AES", b"\x66\x6e\x02\x21\xcc\x44\xc1\xfc\x4a\xab\xf4\x58\xf9\xdf\xdd\x3c")
+
+    def test_aes256_secret_key(self):
+        store = jks.KeyStore.load(KS_PATH + "/jceks/AES256.jceks", "12345678")
+        ske = self.find_secret_key_entry(store, "mykey")
+        self.assertEqual(store.store_type, "jceks")
+        self.check_secret_key_equal(ske.item, "AES", b"\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f\x68\x77\x12\xfd\xe4\xbe\x52\xe9\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f")
+
+    def test_pbkdf2_hmac_sha1(self):
+        store = jks.KeyStore.load(KS_PATH + "/jceks/PBKDF2WithHmacSHA1.jceks", "12345678")
+        ske = self.find_secret_key_entry(store, "mykey")
+        self.assertEqual(store.store_type, "jceks")
+        self.check_secret_key_equal(ske.item, "PBKDF2WithHmacSHA1", b"\x57\x95\x36\xd9\xa2\x7f\x7e\x31\x4e\xf4\xe3\xff\xa5\x76\x26\xef\xe6\x70\xe8\xf4\xd2\x96\xcd\x31\xba\x1a\x82\x7d\x9a\x3b\x1e\xe1")
+
+    def test_unknown_type_of_sealed_object(self):
+        """Verify that an exception is raised when encountering a (serialized) Java object inside a SecretKey entry that is not of type javax.crypto.SealedObject"""
+        self.assertRaises(jks.UnexpectedJavaTypeException, lambda: \
+            jks.KeyStore.load(KS_PATH + "/jceks/unknown_type_of_sealed_object.jceks", "12345678"))
+
+    def test_unknown_type_inside_sealed_object(self):
+        """Verify that an exception is raised when encountering a (serialized) Java object inside of a SealedObject in a SecretKey entry (after decryption) that is not of a recognized/supported type"""
+        self.assertRaises(jks.UnexpectedJavaTypeException, lambda: \
+            jks.KeyStore.load(KS_PATH + "/jceks/unknown_type_inside_sealed_object.jceks", "12345678"))
+
+    def test_unknown_sealed_object_sealAlg(self):
+        self.assertRaises(jks.UnexpectedAlgorithmException, lambda: \
+            jks.KeyStore.load(KS_PATH + "/jceks/unknown_sealed_object_sealAlg.jceks", "12345678"))
+
 class JksAndJceksSaveTests(AbstractTest):
     """
     Test cases that apply to writing either JKS or JCEKS stores.
@@ -388,54 +436,6 @@ class JksAndJceksSaveTests(AbstractTest):
         store = jks.KeyStore.load(KS_PATH + "/jceks/AES128.jceks", "12345678")
         sk = self.find_secret_key_entry(store, "mykey")
         self.assertRaises(jks.util.UnsupportedKeystoreEntryTypeException, jks.KeyStore.new, 'jks', [sk])
-
-class JceSecretKeyLoadTests(AbstractTest):
-    """
-    Tests specifically involving reading SecretKeys in JCEKS keystores
-    """
-    def test_des_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/DES.jceks", "12345678")
-        ske = self.find_secret_key_entry(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(ske.item, "DES", b"\x4c\xf2\xfe\x91\x5d\x08\x2a\x43")
-
-    def test_desede_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/DESede.jceks", "12345678")
-        ske = self.find_secret_key_entry(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(ske.item, "DESede", b"\x67\x5e\x52\x45\xe9\x67\x3b\x4c\x8f\xc1\x94\xce\xec\x43\x3b\x31\x8c\x45\xc2\xe0\x67\x5e\x52\x45")
-
-    def test_aes128_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/AES128.jceks", "12345678")
-        ske = self.find_secret_key_entry(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(ske.item, "AES", b"\x66\x6e\x02\x21\xcc\x44\xc1\xfc\x4a\xab\xf4\x58\xf9\xdf\xdd\x3c")
-
-    def test_aes256_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/AES256.jceks", "12345678")
-        ske = self.find_secret_key_entry(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(ske.item, "AES", b"\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f\x68\x77\x12\xfd\xe4\xbe\x52\xe9\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f")
-
-    def test_pbkdf2_hmac_sha1(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/PBKDF2WithHmacSHA1.jceks", "12345678")
-        ske = self.find_secret_key_entry(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(ske.item, "PBKDF2WithHmacSHA1", b"\x57\x95\x36\xd9\xa2\x7f\x7e\x31\x4e\xf4\xe3\xff\xa5\x76\x26\xef\xe6\x70\xe8\xf4\xd2\x96\xcd\x31\xba\x1a\x82\x7d\x9a\x3b\x1e\xe1")
-
-    def test_unknown_type_of_sealed_object(self):
-        """Verify that an exception is raised when encountering a (serialized) Java object inside a SecretKey entry that is not of type javax.crypto.SealedObject"""
-        self.assertRaises(jks.UnexpectedJavaTypeException, lambda: \
-            jks.KeyStore.load(KS_PATH + "/jceks/unknown_type_of_sealed_object.jceks", "12345678"))
-
-    def test_unknown_type_inside_sealed_object(self):
-        """Verify that an exception is raised when encountering a (serialized) Java object inside of a SealedObject in a SecretKey entry (after decryption) that is not of a recognized/supported type"""
-        self.assertRaises(jks.UnexpectedJavaTypeException, lambda: \
-            jks.KeyStore.load(KS_PATH + "/jceks/unknown_type_inside_sealed_object.jceks", "12345678"))
-
-    def test_unknown_sealed_object_sealAlg(self):
-        self.assertRaises(jks.UnexpectedAlgorithmException, lambda: \
-            jks.KeyStore.load(KS_PATH + "/jceks/unknown_sealed_object_sealAlg.jceks", "12345678"))
 
 class BksOnlyTests(AbstractTest):
     def check_bks_key(self, bkskey):
