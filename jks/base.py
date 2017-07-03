@@ -90,6 +90,13 @@ class AbstractKeystore(object):
         for e in new_entries:
             self.add_entry(e)
 
+    @property
+    def entries(self):
+        """
+        Returns a non-writethrough copy of the current alias -> entry mapping in the key store.
+        """
+        return dict(self._entries) # shallow copy, avoids write-through
+
     @classmethod
     def load(cls, filename, store_password, try_decrypt_keys=True):
         """

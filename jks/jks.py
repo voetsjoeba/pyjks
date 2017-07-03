@@ -362,7 +362,7 @@ class KeyStore(AbstractKeystore):
         if store_type not in ['jks', 'jceks']:
             raise UnsupportedKeystoreTypeException("The Keystore Type '%s' is not supported" % store_type)
 
-        self.entries = {}
+        self._entries = {}
         self.add_entries(entries or [])
 
     def make_entry(self, alias, item, timestamp=None):
@@ -396,10 +396,10 @@ class KeyStore(AbstractKeystore):
             raise UnsupportedKeystoreEntryTypeException("%s keystores cannot store entries of type '%s' -- only supported in JCEKS stores" % (self.store_type.upper(), type(new_entry).__name__))
 
         alias = new_entry.alias
-        if alias in self.entries:
+        if alias in self._entries:
             raise DuplicateAliasException("Found duplicate alias: '%s'" % alias)
 
-        self.entries[alias] = new_entry
+        self._entries[alias] = new_entry
 
     @classmethod
     def loads(cls, data, store_password, try_decrypt_keys=True):
@@ -554,10 +554,10 @@ class KeyStore(AbstractKeystore):
             raise UnsupportedKeystoreTypeException("Only JKS and JCEKS keystores are supported")
 
         keystore += b4.pack(2) # version 2
-        keystore += b4.pack(len(self.entries))
+        keystore += b4.pack(len(self._entries))
 
         # TODO: which alias is the authoritative one? the one in the dict or the one in the entry?
-        for alias, entry in self.entries.items():
+        for alias, entry in self._entries.items():
             # TODO: verify that entry.alias == alias (some smart ass might change the .alias on the entry after it has been inserted under key 'alias' in the store)
             entry.encrypt(store_password)
 
