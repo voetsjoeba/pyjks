@@ -71,6 +71,7 @@ class AbstractTest(unittest.TestCase):
         if not isinstance(pke, jks.PrivateKeyEntry):
             self.fail("Private key entry not found: %s" % alias)
 
+        self.assertTrue(alias in ks.aliases)
         if pke.is_decrypted():
             self.assertTrue(isinstance(pke.item.key, bytes))
             self.assertTrue(isinstance(pke.item.key_pkcs8, bytes))
@@ -87,6 +88,7 @@ class AbstractTest(unittest.TestCase):
         if not isinstance(ske, jks.SecretKeyEntry):
             self.fail("Secret key entry not found: %s" % alias)
 
+        self.assertTrue(alias in ks.aliases)
         if ske.is_decrypted():
             self.assertTrue(isinstance(ske.item.key, bytes))
         return ske
@@ -96,6 +98,7 @@ class AbstractTest(unittest.TestCase):
         if not isinstance(tce, jks.TrustedCertEntry):
             self.fail("Certificate entry not found: %s" % alias)
 
+        self.assertTrue(alias in ks.aliases)
         self.assertTrue(isinstance(tce.item.cert, bytes))
         self.assertTrue(isinstance(tce.item.type, py23basestring))
         return tce
@@ -348,8 +351,9 @@ class JksAndJceksSaveTests(AbstractTest):
     def _test_jks_nodecrypt_roundtrip_identical(self, store_path, store_pw):
         """
         Specific test for JKS keystores:
-          If you load a JKS keystore, don't decrypt any of the keys, save it back out with the same store password, and you also happen to get the entries
-          written out in the same order as the original, then you should get byte-identical output.
+          If you load a JKS keystore, don't decrypt any of the keys, and save it back out with the same store password,
+          then you should get byte-identical output.
+        Note: implicitly requires that saving a store outputs its entries in the same order as they were loaded/added.
         """
         with open(KS_PATH + store_path, 'rb') as file:
             keystore_bytes = file.read()
@@ -365,6 +369,10 @@ class JksAndJceksSaveTests(AbstractTest):
         self._test_jks_nodecrypt_roundtrip_identical("/jks/DSA2048.jks", "12345678")
     def test_load_and_save_keystore_non_ascii_password(self):
         self._test_jks_nodecrypt_roundtrip_identical("/jks/non_ascii_password.jks", u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029")
+    def test_load_and_save_keystore_custom_entry_passwords(self):
+        self._test_jks_nodecrypt_roundtrip_identical("/jks/custom_entry_passwords.jks", "store_password")
+    def test_load_and_save_keystore_3certs(self):
+        self._test_jks_nodecrypt_roundtrip_identical("/jks/3certs.jks", "12345678")
 
     def test_create_and_load_keystore_non_ascii_password(self):
         fancy_password = u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029"

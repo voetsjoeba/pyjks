@@ -243,7 +243,6 @@ class BksKeyStore(AbstractKeystore):
         if store_type not in ['bks']:
             raise UnsupportedKeystoreTypeException("The Keystore Type '%s' is not supported" % store_type)
 
-        self._entries = {}
         self.add_entries(entries or [])
 
     def make_entry(self, alias, item, timestamp=None):
@@ -277,10 +276,10 @@ class BksKeyStore(AbstractKeystore):
             raise UnsupportedKeystoreEntryTypeException("%s keystores cannot store entries of type '%s' -- must be one of %s" % (self.store_type.upper(), type(new_entry).__name__, [t.__name__ for t in valid_entry_types]))
 
         alias = new_entry.alias
-        if alias in self._entries:
+        if alias in self.entries:
             raise DuplicateAliasException("Found duplicate alias: '%s'" % alias)
 
-        self._entries[alias] = new_entry
+        self._entries.append((alias, new_entry))
 
     # TODO: rename to cert_entries
     @property
@@ -459,7 +458,6 @@ class UberKeyStore(BksKeyStore):
         if store_type not in ['uber']:
             raise UnsupportedKeystoreTypeException("The Keystore Type '%s' is not supported" % store_type)
 
-        self._entries = {}
         self.add_entries(entries or [])
 
     @classmethod

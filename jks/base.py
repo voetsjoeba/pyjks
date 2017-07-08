@@ -69,8 +69,7 @@ class AbstractKeystore(object):
     """
     def __init__(self, store_type):
         self.store_type = store_type  #: A string indicating the type of keystore that was loaded.
-        self._entries = {}
-        #self.entries = dict(entries or {})  #: A dictionary of all entries in the keystore, mapped by alias.
+        self._entries = [] # A list (not a dict!) of (alias,entry) pairs. We maintain this as a list so we can ask the store for the order of its aliases (should you ever need that).
 
     def make_entry(self, alias, item, timestamp=None):
         raise NotImplementedError("Abstract method")
@@ -95,7 +94,14 @@ class AbstractKeystore(object):
         """
         Returns a non-writethrough copy of the current alias -> entry mapping in the key store.
         """
-        return dict(self._entries) # shallow copy, avoids write-through
+        return dict(self._entries)
+
+    @property
+    def aliases(self):
+        """
+        Returns the list of aliases in the keystore, in the order they were added (or loaded from a file).
+        """
+        return [kv[0] for kv in self._entries]
 
     @classmethod
     def load(cls, filename, store_password, try_decrypt_keys=True):
