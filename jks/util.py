@@ -181,7 +181,7 @@ class AbstractKeystoreEntry(object):
         raise NotImplementedError("Abstract method")
 
 def as_hex(ba):
-    return "".join("{:02x}".format(b) for b in bytearray(ba))
+    return "".join(r"{0:02x}".format(b) for b in bytearray(ba))
 
 def as_pem(der_bytes, type):
     result = "-----BEGIN %s-----\n" % type
@@ -216,6 +216,32 @@ def pkey_as_pem(pk):
         return as_pem(pk.pkey, "RSA PRIVATE KEY")
     else:
         return as_pem(pk.pkey_pkcs8, "PRIVATE KEY")
+
+def xxd_char(byte):
+    return chr(byte) if (byte >= 32 and byte < 127) else "."
+
+def xxd(bytez, bytes_per_row=16, bytes_per_group=2):
+    """
+    Generates a binary dump of the given data in (roughly) the same format as the Linux xxd utility.
+    """
+    result = ""
+    total = len(bytez)
+    for row_offset in range(0, total, bytes_per_row):
+        hexparts = []
+        asciipart = ""
+        for group_offset in range(0, bytes_per_row, bytes_per_group):
+            hexpart = ""
+            for byte_offset in range(0, bytes_per_group):
+                offset = row_offset + group_offset + byte_offset
+                if offset < total:
+                    hexpart += "%02x" % (bytez[offset],)
+                    asciipart += "%1s" % xxd_char(bytez[offset])
+                else:
+                    hexpart += "  "
+                    asciipart += " "
+            hexparts.append(hexpart)
+        result += "%07x: %s  %s\n" % (row_offset, " ".join(hexparts), asciipart)
+    return result
 
 def strip_pkcs5_padding(m):
     """
