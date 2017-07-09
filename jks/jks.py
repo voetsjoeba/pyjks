@@ -165,6 +165,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
 
     def __init__(self, alias, timestamp, store_type, skey):
         super(SecretKeyEntry, self).__init__(alias, timestamp, store_type)
+        # TODO: check that store_type is jceks
         if isinstance(skey, SecretKey):
             self._plaintext_form = skey
         elif isinstance(skey, javaobj.JavaObject):
@@ -172,7 +173,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
                 raise UnexpectedJavaTypeException("Unexpected sealed object type '%s'; not a subclass of javax.crypto.SealedObject" % skey.get_class().name)
             self._encrypted_form = skey
         else:
-            raise Exception("Invalid secret key value; must be a SecretKey instance or an Java SealedObject instance")
+            raise Exception("Invalid secret key value; must be a SecretKey instance or a JavaObject of class javax.crypto.SealedObject")
 
     def decrypt(self, key_password):
         if self.is_decrypted():
@@ -220,7 +221,13 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         key = None
         algorithm = None
 
-        obj, dummy = KeyStore._read_java_obj(plaintext, 0)
+        try:
+            obj, dummy = KeyStore._read_java_obj(plaintext, 0)
+        except Exception as e:
+            # at this point, either a wrong password was used that happened to decrypt into valid padding bytes, or the content of the entry is
+            # not a valid secret key.
+            raise DecryptionFailureException("Failed to decrypt data for secret key '%s'; wrong password or corrupted entry data?" % self.alias)
+
         clazz = obj.get_class()
         if clazz.name == "javax.crypto.spec.SecretKeySpec":
             algorithm = str(obj.algorithm) # convert from javaobj.JavaString to python native str
