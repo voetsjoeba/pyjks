@@ -208,13 +208,13 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         obj, dummy = KeyStore._read_java_obj(plaintext, 0)
         clazz = obj.get_class()
         if clazz.name == "javax.crypto.spec.SecretKeySpec":
-            algorithm = obj.algorithm
+            algorithm = str(obj.algorithm) # convert from javaobj.JavaString to python native str
             key = java2bytes(obj.key)
 
         elif clazz.name == "java.security.KeyRep":
             assert (obj.type.constant == "SECRET"), "Expected value 'SECRET' for KeyRep.type enum value, found '%s'" % obj.type.constant
             key_bytes = java2bytes(obj.encoded)
-            key_encoding = obj.format
+            key_encoding = str(obj.format)
             if key_encoding == "RAW":
                 pass # ok, no further processing needed
             elif key_encoding == "X.509":
@@ -224,7 +224,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
             else:
                 raise UnexpectedKeyEncodingException("Unexpected key encoding '%s' found in serialized java.security.KeyRep object; expected one of 'RAW', 'X.509', 'PKCS#8'." % key_encoding)
 
-            algorithm = obj.algorithm
+            algorithm = str(obj.algorithm) # convert from javaobj.JavaString to python native str
             key = key_bytes
         else:
             raise UnexpectedJavaTypeException("Unexpected object of type '%s' found inside SealedObject; don't know how to handle it" % clazz.name)
