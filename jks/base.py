@@ -1,7 +1,5 @@
 # vim: set et ai ts=4 sts=4 sw=4:
-from pyasn1.codec.ber import encoder, decoder
 from pyasn1_modules import rfc5208, rfc2459
-from pyasn1.type import univ
 from .util import *
 
 # basic value types that can be entered into keystores through respective entries
@@ -17,7 +15,7 @@ class TrustedCertificate(object):
 
 class PublicKey(object):
     def __init__(self, key_info):
-        spki = decoder.decode(key_info, asn1Spec=rfc2459.SubjectPublicKeyInfo())[0]
+        spki = asn1_checked_decode(key_info, asn1Spec=rfc2459.SubjectPublicKeyInfo())
         self.key_info = key_info
         self.key = bitstring_to_bytes(spki['subjectPublicKey'])
         self.algorithm_oid = spki['algorithm']['algorithm'].asTuple()
@@ -33,26 +31,16 @@ class PrivateKey(object):
             raise ValueError("certs argument must be a list of TrustedCertificate instances")
 
         if key_format == 'pkcs8':
-            private_key_info = decoder.decode(key, asn1Spec=rfc5208.PrivateKeyInfo())[0]
-
-            self.algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
-            self.key = private_key_info['privateKey'].asOctets()
-            self.key_pkcs8 = key
+            try:
+                self.key, self.algorithm_oid = pkcs8_unwrap(key) # raises an exception if not a valid PKCS#8-encoded key
+                self.key_pkcs8 = key
+            except PyAsn1Error as e:
+                raise BadKeyEncodingException("Failed to parse provided key as a PKCS#8 PrivateKeyInfo structure", e)
 
         elif key_format == 'rsa_raw':
             self.algorithm_oid = RSA_ENCRYPTION_OID
-
-            # We must encode it to pkcs8
-            private_key_info = rfc5208.PrivateKeyInfo()
-            private_key_info.setComponentByName('version','v1')
-            a = rfc2459.AlgorithmIdentifier()
-            a.setComponentByName('algorithm', self.algorithm_oid)
-            a.setComponentByName('parameters', univ.Null())
-            private_key_info.setComponentByName('privateKeyAlgorithm', a)
-            private_key_info.setComponentByName('privateKey', key)
-
-            self.key_pkcs8 = encoder.encode(private_key_info)
             self.key = key
+            self.key_pkcs8 = pkcs8_wrap(key, self.algorithm_oid)
 
         else:
             raise UnsupportedKeyFormatException("Key Format '%s' is not supported" % key_format)

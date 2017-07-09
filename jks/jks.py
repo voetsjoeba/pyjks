@@ -30,7 +30,7 @@ import struct
 import hashlib
 import javaobj
 import time
-from pyasn1.codec.ber import encoder, decoder
+from pyasn1.codec.der import encoder
 from pyasn1_modules import rfc5208, rfc2459
 from pyasn1.type import univ, namedtype
 from . import rfc2898
@@ -78,7 +78,12 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         if self.is_decrypted():
             return
 
-        encrypted_info = decoder.decode(self._encrypted_form, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())[0]
+        encrypted_info = None
+        try:
+            encrypted_info = asn1_checked_decode(self._encrypted_form, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())
+        except PyAsn1Error:
+            raise DecryptionFailureException("Failed to decrypt data for private key '%s': not a valid PKCS#8 EncryptedPrivateKeyInfo structure", e)
+
         algo_id = encrypted_info['encryptionAlgorithm']['algorithm'].asTuple()
         algo_params = encrypted_info['encryptionAlgorithm']['parameters'].asOctets()
         encrypted_private_key = encrypted_info['encryptedData'].asOctets()
@@ -92,7 +97,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
                 if self.store_type != "jceks":
                     raise UnexpectedAlgorithmException("Encountered JCEKS private key protection algorithm in JKS keystore")
                 # see RFC 2898, section A.3: PBES1 and definitions of AlgorithmIdentifier and PBEParameter
-                params = decoder.decode(algo_params, asn1Spec=rfc2898.PBEParameter())[0]
+                params = asn1_checked_decode(algo_params, asn1Spec=rfc2898.PBEParameter())
                 salt = params['salt'].asOctets()
                 iteration_count = int(params['iterationCount'])
                 plaintext = sun_crypto.jce_pbe_decrypt(encrypted_private_key, key_password, salt, iteration_count)
@@ -102,9 +107,19 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         except (BadHashCheckException, BadPaddingException):
             raise DecryptionFailureException("Failed to decrypt data for private key '%s'; wrong password?" % self.alias)
 
-        # at this point, 'plaintext' is a PKCS#8 PrivateKeyInfo (see RFC 5208)
+        # In JCEKS stores, the key protection scheme is password-based encryption with PKCS#5/7 padding, so any wrong password has a 1/256
+        # chance of producing a 0x01 byte as the last byte and passing the padding check but producing garbage plaintext.
+
+        # The plaintext should be a DER-encoded PKCS#8 PrivateKeyInfo, so try to parse it as such; if that fails, then
+        # either the password was wrong and we hit a 1/256 case, or the password was right and the data is genuinely corrupt.
+        # In sane use cases the latter shouldn't happen, so let's assume the former.
+        try:
+            pk = PrivateKey(plaintext, self.certs, key_format='pkcs8')
+        except BadKeyEncodingException:
+            raise DecryptionFailureException("Failed to decrypt data for private key '%s'; wrong password?" % self.alias)
+
         self._encrypted_form = None
-        self._plaintext_form = PrivateKey(plaintext, self.certs, key_format='pkcs8')
+        self._plaintext_form = pk
         self.certs = None # PrivateKey object now contains the definitive certificate list
 
     def encrypt(self, key_password):
@@ -178,7 +193,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
             if encodedParams is None or len(encodedParams) == 0:
                 raise UnexpectedJavaTypeException("No parameters found in SealedObject instance for sealing algorithm '%s'; need at least a salt and iteration count to decrypt" % sealed_obj.sealAlg)
 
-            params_asn1 = decoder.decode(encodedParams, asn1Spec=rfc2898.PBEParameter())[0]
+            params_asn1 = asn1_checked_decode(encodedParams, rfc2898.PBEParameter())
             salt = params_asn1['salt'].asOctets()
             iteration_count = int(params_asn1['iterationCount'])
             try:

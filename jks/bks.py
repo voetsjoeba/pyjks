@@ -1,7 +1,6 @@
 # vim: set et ai ts=4 sts=4 sw=4:
 import struct
 import hashlib
-from pyasn1.codec.ber import decoder
 from pyasn1_modules import rfc5208, rfc2459
 from Crypto.Hash import HMAC, SHA
 from .util import *

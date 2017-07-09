@@ -8,6 +8,11 @@ import ctypes
 import javaobj
 import tempfile
 
+from pyasn1.codec.der import encoder, decoder
+from pyasn1_modules import rfc5208, rfc2459
+from pyasn1.type import univ
+from pyasn1.error import PyAsn1Error
+
 b8 = struct.Struct('>Q')
 b4 = struct.Struct('>L') # unsigned
 b2 = struct.Struct('>H')
@@ -52,6 +57,9 @@ class IllegalPasswordCharactersException(KeystoreException):
     pass
 class BadHashCheckException(KeystoreException):
     """Signifies that a hash computation did not match an expected value."""
+    pass
+class BadKeyEncodingException(KeystoreException):
+    """Signifies that a key that was declared to be encoded in a particular format could not be interpreted as such"""
     pass
 class DecryptionFailureException(KeystoreException):
     """Signifies failure to decrypt a value."""
@@ -180,6 +188,48 @@ def add_pkcs7_padding(m, block_size):
     num_padding_bytes = block_size - (len(m) % block_size)
     m = m + bytearray([num_padding_bytes]*num_padding_bytes)
     return bytes(m)
+
+def asn1_checked_decode(asn1_bytes, asn1Spec):
+    """
+    Decodes the input ASN.1 byte sequence and returns it as an object of the given spec if it could be successfully decoded as such,
+    or raises a PyAsn1Error otherwise.
+    """
+    obj = decoder.decode(asn1_bytes, asn1Spec=asn1Spec)[0]
+    # Note: despite the asn1Spec parameter to decoder.decode, you can still get an object of a different type, on which the remainder of the operations
+    # you might want to do on those (like accessing members) raises a TypeError.
+    # Motivating use case is feeding b"\x00\x00" to decoder.decode(); regardless of asn1Spec, you'll get an EndOfOctets() object that will throw TypeErrors
+    # when you try to access members through obj['foo'] syntax.
+    if not isinstance(obj, asn1Spec.__class__): # old pyasn1 versions still use old-style classes
+        raise PyAsn1Error("Not a valid %s structure" % (asn1Spec.__class__.__name__, ))
+    return obj
+
+def pkcs8_unwrap(pkcs8_key):
+    """
+    Given a PKCS#8-encoded private key, returns the algorithm OID and raw key contained within it.
+    """
+    try:
+        private_key_info = asn1_checked_decode(pkcs8_key, rfc5208.PrivateKeyInfo())
+        algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
+        key           = private_key_info['privateKey'].asOctets()
+        return (key, algorithm_oid)
+    except PyAsn1Error as e:
+        raise BadKeyEncodingException("Failed to parse provided key as a PKCS#8 PrivateKeyInfo structure", e)
+
+def pkcs8_wrap(key, algorithm_oid, algorithm_params=None):
+    """
+    Given an algorithm OID tuple and a raw key, returns a PKCS#8-encoded private key.
+    """
+    algorithm_params = algorithm_params or univ.Null()
+
+    private_key_info = rfc5208.PrivateKeyInfo()
+    private_key_info.setComponentByName('version','v1')
+    a = rfc2459.AlgorithmIdentifier()
+    a.setComponentByName('algorithm', algorithm_oid)
+    a.setComponentByName('parameters', algorithm_params)
+    private_key_info.setComponentByName('privateKeyAlgorithm', a)
+    private_key_info.setComponentByName('privateKey', key)
+
+    return encoder.encode(private_key_info)
 
 class tempfile_path(object):
     """
