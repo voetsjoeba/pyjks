@@ -32,6 +32,8 @@ import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.PBEParameterSpec;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
@@ -94,16 +96,24 @@ public class PyJksTestCase
 	 */
 	protected void writePythonDataFile(String filename, KeyPair keyPair, Certificate[] certs) throws Exception
 	{
-		String privateKeyPadding = StringUtils.repeat(" ", "private_key = ".length());
-		String publicKeyPadding  = StringUtils.repeat(" ", "public_key = ".length());
-		String certsPadding      = StringUtils.repeat(" ", "certs = [".length());
+		String privateKeyPadding    = StringUtils.repeat(" ", "private_key_pkcs8 = ".length());
+		String rawPrivateKeyPadding = StringUtils.repeat(" ", "private_key_raw = ".length());
+		String publicKeyPadding     = StringUtils.repeat(" ", "public_key = ".length());
+		String certsPadding         = StringUtils.repeat(" ", "certs = [".length());
+
+		byte[] privKeyPkcs8 = keyPair.getPrivate().getEncoded();
+		PrivateKeyInfo privKeyInfo = PrivateKeyInfo.getInstance(ASN1Primitive.fromByteArray(privKeyPkcs8));
+		byte[] privKeyRaw = privKeyInfo.parsePrivateKey().toASN1Primitive().getEncoded();
 
 		StringBuffer sb = new StringBuffer();
 		sb.append("public_key = ");
 		sb.append(StringUtils.stripStart(toPythonString(keyPair.getPublic().getEncoded(), 32, publicKeyPadding), null));
 		sb.append("\n");
-		sb.append("private_key = ");
+		sb.append("private_key_pkcs8 = ");
 		sb.append(StringUtils.stripStart(toPythonString(keyPair.getPrivate().getEncoded(), 32, privateKeyPadding), null));
+		sb.append("\n");
+		sb.append("private_key_raw = ");
+		sb.append(StringUtils.stripStart(toPythonString(privKeyRaw, 32, rawPrivateKeyPadding), null));
 		sb.append("\n");
 		sb.append("certs = [");
 		for (int i = 0; i < certs.length; i++)
