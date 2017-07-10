@@ -367,6 +367,8 @@ class JksAndJceksLoadTests(AbstractTest):
         pke = self.find_private_key_entry(store, "mykey")
         self.assertEqual(store.store_type, "jks")
         self.check_pkey_and_certs_equal(pke.item, jks.util.RSA_ENCRYPTION_OID, expected.jks_non_ascii_password.private_key_pkcs8, expected.jks_non_ascii_password.certs)
+        # TODO: test characters outside the BMP (see if Java uses modified or standard UTF-8 for the encoding of the alias
+        #       (JavaKeyStore$JKS defers to DataInput/OutputStream for reading/writing UTF8, which suggests modified UTF-8)
 
     def test_jceks_bad_private_key_decrypt(self):
         # In JCEKS stores, the key protection scheme is password-based encryption with PKCS#5/7 padding, so any wrong password has a 1/256
@@ -871,6 +873,39 @@ class BksOnlyTests(AbstractTest):
         self.assertEqual(jks.bks.BksKey.type2str(jks.bks.BksKey.KEY_TYPE_SECRET),  "SECRET")
         self.assertEqual(jks.bks.BksKey.type2str(-1),  None)
 
+    def test_bks_bad_sealedkey_decrypt(self):
+        # Here's a keystore such that when you try to decrypt the SealedKeyEntry called "sealed_public_key" with the password "store_password" (i.e. same as the store's
+        # overall password, like try_decrypt_keys would do), produces a bad decrypt that we should be able to detect (i.e. decrypts to garbage plaintext
+        # while still passing the PKCS#5 padding check).
+
+        # Note: this is for an UBER keystore, but it equally applies to BKS stores; both store entries the same way, difference is in how they wrap them
+        store = jks.bks.UberKeyStore.load(KS_PATH + "/uber/custom_entry_passwords_bad_decrypt.uber", "store_password", try_decrypt_keys=False)
+        self.assertRaises(DecryptionFailureException, store.entries["sealed_public_key"].decrypt, "store_password")
+
+        # here's the encrypted blob for that entry and its PBE parameters:
+        salt = b"\xba\xd3\x72\xf7\x27\x85\xe3\x7d\xae\xc7\x3f\x87\x0c\x86\xa5\x53\x53\x5c\x08\xa5"
+        iteration_count = 1992
+        encrypted_bkskey = b"\xfa\xee\x0e\x90\x70\xbd\x38\x60\xc5\xfb\x59\x80\x2e\x22\x11\x09" + \
+                           b"\x01\x8c\x4f\x9e\x5a\xe6\xab\x5e\x34\x98\xd7\x2b\xbc\x00\xcc\xd1" + \
+                           b"\x8b\x17\x96\x40\xdf\x9a\xe3\x86\x36\x6f\x88\x38\x80\x55\x20\x9b" + \
+                           b"\x6d\x39\xbb\x7e\xd1\x9e\x1c\x26\x8b\x35\xe5\x28\xf2\x00\xc3\x78" + \
+                           b"\x12\x12\x93\xdc\x65\xb3\x57\x44\x8b\x57\xf1\x19\x79\x2e\x0d\xae" + \
+                           b"\x62\x96\x88\x02\x7c\xe7\x4d\xbe\xdf\xf8\xd5\x3b\xfe\xe7\xf4\x12" + \
+                           b"\x87\x18\x99\x9e\x0c\xb3\xc5\x11\xb3\xfd\xaa\x99\xf1\x25\x3a\xd3" + \
+                           b"\x38\x61\x58\x5c\xf0\xba\xbe\x12\xe8\x07\x9b\x32\xfa\x6e\xeb\x62" + \
+                           b"\xe0\x1e\xf8\xde\xe3\x90\xaf\x92\x1d\x0f\xf2\xdd\x95\xb4\xbe\xd2" + \
+                           b"\x5e\x76\x1a\x5f\x0e\x07\xdc\xc5\xf9\x8a\x78\x87\xcc\xfe\x5d\xa8" + \
+                           b"\xaa\x4d\x16\x59\x1d\x4e\x02\xb0\x9f\x2f\x60\xba\x2a\x17\x0f\x54" + \
+                           b"\x6e\xb1\x79\x49\x73\x33\x9e\xa5"
+
+        entry_data = b4.pack(len(salt)) + salt
+        entry_data += b4.pack(iteration_count)
+        entry_data += encrypted_bkskey
+
+        # decrypting this blob will result in a 0x01 byte at the end, which passes the padding check, but produce garbage plaintext
+        # equivalently:
+        entry = jks.bks.BksSealedKeyEntry("alias", 0, "uber", [], entry_data)
+        self.assertRaises(DecryptionFailureException, entry.decrypt, "store_password")
 
 class MiscTests(AbstractTest):
     def test_bitstring_to_bytes(self):
