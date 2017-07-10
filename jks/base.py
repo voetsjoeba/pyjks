@@ -47,8 +47,10 @@ class AbstractKeystore(object):
 
     @classmethod
     def _read_data(cls, data, pos):
-        size = b4.unpack_from(data, pos)[0]
-        pos += 4
+        size = b4.unpack_from(data, pos)[0]; pos += 4
+        # TODO: make a test that checks that this is enforced
+        if size > len(data):
+            raise BadDataLengthException("Cannot read binary data; length exceeds remaining available data")
         return data[pos:pos+size], pos+size
 
     @classmethod
