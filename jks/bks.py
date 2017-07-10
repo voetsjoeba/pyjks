@@ -38,7 +38,7 @@ class BksKey(object):
             self.key = SecretKey(key, algorithm)
 
         else:
-            raise UnexpectedKeyEncodingException("Key type %r not recognized" % (self.type,))
+            raise UnsupportedKeystoreEntryTypeException("Key type %r not recognized" % (self.type,))
 
     @classmethod
     def create_from(cls, obj):
