@@ -908,6 +908,60 @@ class BksOnlyTests(AbstractTest):
         self.assertRaises(DecryptionFailureException, entry.decrypt, "store_password")
 
 class MiscTests(AbstractTest):
+    def test_decode_modified_utf8(self):
+        self.assertEqual('', decode_modified_utf8(b""))
+        self.assertEqual(u'\U00000000', decode_modified_utf8(b"\xc0\x80"))
+        self.assertEqual(u'\U00000001', decode_modified_utf8(b"\x01"))
+        self.assertEqual(u'\U0000007F', decode_modified_utf8(b"\x7f"))
+        self.assertEqual(u'\U00000080', decode_modified_utf8(b"\xc2\x80"))
+        self.assertEqual(u'\U000007FF', decode_modified_utf8(b"\xdf\xbf"))
+        self.assertEqual(u'\U00000800', decode_modified_utf8(b"\xe0\xa0\x80"))
+        self.assertEqual(u'\U0000D7FF', decode_modified_utf8(b"\xed\x9f\xbf"))
+        self.assertEqual(u'\U0000E000', decode_modified_utf8(b"\xee\x80\x80"))
+        self.assertEqual(u'\U0000FFFF', decode_modified_utf8(b"\xef\xbf\xbf"))
+        self.assertEqual(u'\U00010000', decode_modified_utf8(b"\xed\xa0\x80\xed\xb0\x80"))
+        self.assertEqual(u'\U0010FFFF', decode_modified_utf8(b"\xed\xaf\xbf\xed\xbf\xbf"))
+
+        # overlong sequences
+        self.assertRaises(Exception, decode_cesu8, b"\xc0\x80") # encoding U+0000 as 0xC080 is a modified UTF-8 thing, not a CESU-8 thing
+        self.assertRaises(Exception, decode_modified_utf8, b"\xe0\x80\x80")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xf0\x80\x80\x80")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xf8\x80\x80\x80\x80")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xfc\x80\x80\x80\x80\x80")
+
+        # unexpected continuation bytes
+        self.assertRaises(Exception, decode_modified_utf8, b"\x80")
+        self.assertRaises(Exception, decode_modified_utf8, b"\x80\x80")
+        self.assertRaises(Exception, decode_modified_utf8, b"\x80\x80\x80")
+
+        # truncated continuations
+        self.assertRaises(Exception, decode_modified_utf8, b"\xc0\x41")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xd0\x41")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xe0\x41")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xe0\x80\x41")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xf0\x41")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xf0\x80\x41")
+        self.assertRaises(Exception, decode_modified_utf8, b"\xf0\x80\x80\x41")
+
+        # 4-byte UTF-8 sequences are illegal in CESU-8 and modified-UTF-8
+        self.assertRaises(Exception, decode_modified_utf8, b"\xf0\x90\x80\x80")
+
+    def test_encode_modified_utf8(self):
+        self.assertEqual(encode_modified_utf8(''), b"")
+        self.assertEqual(encode_modified_utf8(u'\U00000000'), b"\xc0\x80")
+        self.assertEqual(encode_modified_utf8(u'\U00000001'), b"\x01")
+        self.assertEqual(encode_modified_utf8(u'\U0000007F'), b"\x7f")
+        self.assertEqual(encode_modified_utf8(u'\U00000080'), b"\xc2\x80")
+        self.assertEqual(encode_modified_utf8(u'\U000007FF'), b"\xdf\xbf")
+        self.assertEqual(encode_modified_utf8(u'\U00000800'), b"\xe0\xa0\x80")
+        self.assertEqual(encode_modified_utf8(u'\U0000D7FF'), b"\xed\x9f\xbf")
+        self.assertEqual(encode_modified_utf8(u'\U0000E000'), b"\xee\x80\x80")
+        self.assertEqual(encode_modified_utf8(u'\U0000FFFF'), b"\xef\xbf\xbf")
+        self.assertEqual(encode_modified_utf8(u'\U00010000'), b"\xed\xa0\x80\xed\xb0\x80")
+        self.assertEqual(encode_modified_utf8(u'\U0010FFFF'), b"\xed\xaf\xbf\xed\xbf\xbf")
+
+        self.assertEqual(encode_cesu8(u'\U00000000'), b"\x00") # encoding U+0000 as 0xC080 is a modified UTF-8 thing, not a CESU-8 thing
+
     def test_bitstring_to_bytes(self):
         def bs2b(t, _str):
             bits_tuple = tuple(map(int, _str.replace(" ", "")))
