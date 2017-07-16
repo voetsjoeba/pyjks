@@ -102,20 +102,22 @@ public class PyJksTestCase
 		String publicKeyPadding     = StringUtils.repeat(" ", "public_key = ".length());
 		String certsPadding         = StringUtils.repeat(" ", "certs = [".length());
 
-		byte[] privKeyPkcs8 = keyPair.getPrivate().getEncoded();
-		PrivateKeyInfo privKeyInfo = PrivateKeyInfo.getInstance(ASN1Primitive.fromByteArray(privKeyPkcs8));
-		byte[] privKeyRaw = privKeyInfo.parsePrivateKey().toASN1Primitive().getEncoded();
-
 		StringBuffer sb = new StringBuffer();
-		sb.append("public_key = ");
-		sb.append(StringUtils.stripStart(toPythonString(keyPair.getPublic().getEncoded(), 32, publicKeyPadding), null));
-		sb.append("\n");
-		sb.append("private_key_pkcs8 = ");
-		sb.append(StringUtils.stripStart(toPythonString(keyPair.getPrivate().getEncoded(), 32, privateKeyPadding), null));
-		sb.append("\n");
-		sb.append("private_key_raw = ");
-		sb.append(StringUtils.stripStart(toPythonString(privKeyRaw, 32, rawPrivateKeyPadding), null));
-		sb.append("\n");
+		if (keyPair != null) {
+			byte[] privKeyPkcs8 = keyPair.getPrivate().getEncoded();
+			PrivateKeyInfo privKeyInfo = PrivateKeyInfo.getInstance(ASN1Primitive.fromByteArray(privKeyPkcs8));
+			byte[] privKeyRaw = privKeyInfo.parsePrivateKey().toASN1Primitive().getEncoded();
+
+			sb.append("public_key = ");
+			sb.append(StringUtils.stripStart(toPythonString(keyPair.getPublic().getEncoded(), 32, publicKeyPadding), null));
+			sb.append("\n");
+			sb.append("private_key_pkcs8 = ");
+			sb.append(StringUtils.stripStart(toPythonString(keyPair.getPrivate().getEncoded(), 32, privateKeyPadding), null));
+			sb.append("\n");
+			sb.append("private_key_raw = ");
+			sb.append(StringUtils.stripStart(toPythonString(privKeyRaw, 32, rawPrivateKeyPadding), null));
+			sb.append("\n");
+		}
 		sb.append("certs = [");
 		for (int i = 0; i < certs.length; i++)
 		{
