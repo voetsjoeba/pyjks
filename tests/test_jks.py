@@ -451,8 +451,13 @@ class JksAndJceksSaveTests(AbstractTest):
         pk = jks.PrivateKey(expected.jks_non_ascii_password.private_key, [jks.base.TrustedCertificate("X.509", data) for data in expected.jks_non_ascii_password.certs])
         items = {"mykey": pk}
         fancy_password = u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029"
-        self._test_create_and_load_keystore("jks", fancy_password, items)
-        self.assertRaises(ValueError, self._test_create_and_load_keystore, "jceks", fancy_password, items) # Note: JCEKS stores require ASCII passwords
+
+        # Note: JCEKS stores require that the passwords for keys are ASCII-only (the store password can still be non-ASCII).
+        # JKS stores have no such restriction.
+        self._test_create_and_load_keystore("jks",   fancy_password, items)
+        self.assertRaises(IllegalPasswordCharactersException, self._test_create_and_load_keystore, "jceks", fancy_password, items) # private key will get auto-encrypted with the store password
+        self.assertRaises(IllegalPasswordCharactersException, self._test_create_and_load_keystore, "jceks", "12345678", items, entry_pws={"mykey": fancy_password}) # show that the issue is with the key's password ...
+        self._test_create_and_load_keystore("jceks", fancy_password, items, entry_pws={"mykey": "12345678"}) # ... not the store password.
 
     def test_create_and_load_non_ascii_alias(self):
         pk = jks.PrivateKey(expected.RSA1024.private_key, [jks.base.TrustedCertificate("X.509", data) for data in expected.RSA1024.certs])
@@ -821,9 +826,9 @@ class MiscTests(AbstractTest):
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\xc4\x20\x59\xac\x54\x03\xc7\xbf", "my_password", b"\x01\x02\x03\x04\x05\x06\x07\x08", 42))
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\xef\x9f\xbd\xc5\x91\x5f\x49\x50", "my_password", b"\x01\x02\x03\x04\x01\x02\x03\x05", 42))
         self.assertEqual(b"sample", jks.sun_crypto.jce_pbe_decrypt(b"\x72\x8f\xd8\xcc\x21\x41\x25\x80", "my_password", b"\x01\x02\x03\x04\x01\x02\x03\x04", 42))
-        self.assertRaises(ValueError, jks.sun_crypto.jce_pbe_decrypt, b"\x00\x00\x00\x00\x00\x00\x00\x00", "my_password", b"\x00", 42)   # salt too short
-        self.assertRaises(ValueError, jks.sun_crypto.jce_pbe_decrypt, b"\x00\x00\x00\x00\x00\x00\x00\x00", "my_password", b"\x00"*9, 42) # salt too long
-        self.assertRaises(ValueError, jks.sun_crypto.jce_pbe_decrypt, b"\xc4\x20\x59\xac\x54\x03\xc7\xbf", "my_p\xc3\xa1ssword", b"\x01\x02\x03\x04\x05\x06\x07\x08", 42) # non-ASCII password characters
+        self.assertRaises(BadDataLengthException, jks.sun_crypto.jce_pbe_decrypt, b"\x00\x00\x00\x00\x00\x00\x00\x00", "my_password", b"\x00", 42)   # salt too short
+        self.assertRaises(BadDataLengthException, jks.sun_crypto.jce_pbe_decrypt, b"\x00\x00\x00\x00\x00\x00\x00\x00", "my_password", b"\x00"*9, 42) # salt too long
+        self.assertRaises(IllegalPasswordCharactersException, jks.sun_crypto.jce_pbe_decrypt, b"\xc4\x20\x59\xac\x54\x03\xc7\xbf", "my_p\xc3\xa1ssword", b"\x01\x02\x03\x04\x05\x06\x07\x08", 42) # non-ASCII password characters
 
     def test_pkcs12_key_derivation(self):
         self.assertEqual(jks.rfc7292.derive_key(hashlib.sha1, jks.rfc7292.PURPOSE_MAC_MATERIAL, "", b"\x01\x02\x03\x04\x05\x06\x07\x08", 1000, 16), b"\xe7\x76\x85\x01\x6a\x53\x62\x1e\x9a\x2a\x8a\x0f\x80\x00\x2e\x70")

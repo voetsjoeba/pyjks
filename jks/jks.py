@@ -502,7 +502,10 @@ class KeyStore(AbstractKeystore):
                 if try_decrypt_keys:
                     try:
                         entry.decrypt(store_password)
-                    except DecryptionFailureException:
+                    except (DecryptionFailureException, IllegalPasswordCharactersException):
+                        # Note: IllegalPasswordCharactersException can happen here in the case of JCEKS keystores; JCEKS stores have the restriction that key passwords
+                        # must be ASCII-only, but the store password can be anything it wants. So we might get IllegalPasswordCharactersException if the store password
+                        # is non-ASCII and we try to decrypt a key with it.
                         pass # ok, let user call decrypt() manually
 
                 store.add_entries([entry])

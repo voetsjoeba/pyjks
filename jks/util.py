@@ -47,6 +47,9 @@ class BadDataLengthException(KeystoreException):
 class BadPaddingException(KeystoreException):
     """Signifies that bad padding was encountered during decryption."""
     pass
+class IllegalPasswordCharactersException(KeystoreException):
+    """Signifies that the given password contains illegal characters for the given store."""
+    pass
 class BadHashCheckException(KeystoreException):
     """Signifies that a hash computation did not match an expected value."""
     pass
