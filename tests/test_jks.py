@@ -67,74 +67,108 @@ class AbstractTest(unittest.TestCase):
         self.assertEqual(sk.key_size, key_size)
         self.assertEqual(sk.key, key_bytes)
 
-class JksTests(AbstractTest):
-    def test_empty_store(self):
-        store = jks.KeyStore.load(KS_PATH + "/jks/empty.jks", "")
-        self.assertEqual(store.store_type, "jks")
+class JksAndJceksLoadTests(AbstractTest):
+    """
+    Test cases that apply to reading either JKS or JCEKS stores.
+    """
+    def _test_load_empty_store(self, store_type):
+        store = jks.KeyStore.load(KS_PATH + "/{0}/empty.{0}".format(store_type), "")
+        self.assertEqual(store.store_type, store_type)
         self.assertEqual(len(store.entries), 0)
 
-    def test_bad_keystore_format(self):
-        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\x00\x00\x00\x00", "") # bad magic bytes
-        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\xFE\xED\xFE\xED\x00", "") # insufficient store version bytes
-        self.assertRaises(jks.util.UnsupportedKeystoreVersionException, jks.KeyStore.loads, b"\xFE\xED\xFE\xED\x00\x00\x00\x00", "") # unknown store version
-        self.assertRaises(jks.util.KeystoreSignatureException, jks.KeyStore.loads, b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*20, "") # bad signature
-        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*19, "") # insufficient signature bytes
+    def test_load_empty_store(self):
+        self._test_load_empty_store("jks")
+        self._test_load_empty_store("jceks")
+
+    def _test_bad_keystore_format(self, store_type):
+        magic_bytes = jks.MAGIC_NUMBER_JKS if (store_type == "jks") else jks.MAGIC_NUMBER_JCEKS
+
+        self.assertRaises(jks.util.BadKeystoreFormatException,          jks.KeyStore.loads, b"\x00\x00\x00\x00", "") # bad magic bytes
+        self.assertRaises(jks.util.BadKeystoreFormatException,          jks.KeyStore.loads, magic_bytes + b"\x00", "") # insufficient store version bytes
+        self.assertRaises(jks.util.UnsupportedKeystoreVersionException, jks.KeyStore.loads, magic_bytes + b"\x00\x00\x00\x00", "") # unknown store version
+        self.assertRaises(jks.util.KeystoreSignatureException,          jks.KeyStore.loads, magic_bytes + b"\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*20, "") # bad signature
+        self.assertRaises(jks.util.BadKeystoreFormatException,          jks.KeyStore.loads, magic_bytes + b"\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*19, "") # insufficient signature bytes
 
         self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
-            b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x01"
+            magic_bytes + b"\x00\x00\x00\x02\x00\x00\x00\x01" + \
             b"\x00\x00\x00\x02" b"\x00\x05" b"\xFF\xFF\xFF\xFF\xFF", "") # bad alias UTF-8 data
 
         self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
-            b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x01"
+            magic_bytes + b"\x00\x00\x00\x02\x00\x00\x00\x01" + \
             b"\xFF\xFF\xFF\xFF" b"\x00\x05" b"\x41\x41\x41\x41\x41" + jks.util.b8.pack(int(time.time()*1000)), "") # unknown entry type
 
         self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
-            b"\xFE\xED\xFE\xED\x00\x00\x00\x02\x00\x00\x00\x01"
+            jks.MAGIC_NUMBER_JKS + b"\x00\x00\x00\x02\x00\x00\x00\x01" + \
             b"\x00\x00\x00\x03" b"\x00\x05" b"\x41\x41\x41\x41\x41" + jks.util.b8.pack(int(time.time()*1000)), "") # JCEKS entry type in JKS store
 
-    def test_trailing_data(self):
+    def test_bad_keystore_format(self):
+        self._test_bad_keystore_format("jks")
+        self._test_bad_keystore_format("jceks")
+
+    def _test_trailing_data(self, store_type):
         """Issue #21 on github; Portecle is able to load keystores with trailing data after the hash, so we should be as well."""
         store_bytes = None
-        with open(KS_PATH + "/jks/RSA1024.jks", "rb") as f:
+        with open(KS_PATH + "/{0}/RSA1024.{0}".format(store_type), "rb") as f:
             store_bytes = f.read()
         store = jks.KeyStore.loads(store_bytes + b"\x00"*1,    "12345678")
         store = jks.KeyStore.loads(store_bytes + b"\x00"*1000, "12345678")
 
-    def test_rsa_1024(self):
-        store = jks.KeyStore.load(KS_PATH + "/jks/RSA1024.jks", "12345678")
+    def test_trailing_data(self):
+        self._test_trailing_data("jks")
+        self._test_trailing_data("jceks")
+
+    def _test_rsa_1024(self, store_type):
+        store = jks.KeyStore.load(KS_PATH + "/{0}/RSA1024.{0}".format(store_type), "12345678")
         pk = self.find_private_key(store, "mykey")
-        self.assertEqual(store.store_type, "jks")
+        self.assertEqual(store.store_type, store_type)
         self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.RSA1024.private_key, expected.RSA1024.certs)
 
-    def test_rsa_2048_3certs(self):
-        store = jks.KeyStore.load(KS_PATH + "/jks/RSA2048_3certs.jks", "12345678")
+    def test_rsa_1024(self):
+        self._test_rsa_1024("jks")
+        self._test_rsa_1024("jceks")
+
+    def _test_rsa_2048_3certs(self, store_type):
+        store = jks.KeyStore.load(KS_PATH + "/{0}/RSA2048_3certs.{0}".format(store_type), "12345678")
         pk = self.find_private_key(store, "mykey")
-        self.assertEqual(store.store_type, "jks")
+        self.assertEqual(store.store_type, store_type)
         self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.RSA2048_3certs.private_key, expected.RSA2048_3certs.certs)
 
-    def test_dsa_2048(self):
-        store = jks.KeyStore.load(KS_PATH + "/jks/DSA2048.jks", "12345678")
+    def test_rsa_2048_3certs(self):
+        self._test_rsa_2048_3certs("jks")
+        self._test_rsa_2048_3certs("jceks")
+
+    def _test_dsa_2048(self, store_type):
+        store = jks.KeyStore.load(KS_PATH + "/{0}/DSA2048.{0}".format(store_type), "12345678")
         pk = self.find_private_key(store, "mykey")
-        self.assertEqual(store.store_type, "jks")
+        self.assertEqual(store.store_type, store_type)
         self.check_pkey_and_certs_equal(pk, jks.util.DSA_OID, expected.DSA2048.private_key, expected.DSA2048.certs)
 
-    def test_certs(self):
-        store = jks.KeyStore.load(KS_PATH + "/jks/3certs.jks", "12345678")
+    def test_dsa_2048(self):
+        self._test_dsa_2048("jks")
+        self._test_dsa_2048("jceks")
+
+    def _test_certs(self, store_type):
+        store = jks.KeyStore.load(KS_PATH + "/{0}/3certs.{0}".format(store_type), "12345678")
+        self.assertEqual(store.store_type, store_type)
+
         cert1 = self.find_cert(store, "cert1")
         cert2 = self.find_cert(store, "cert2")
         cert3 = self.find_cert(store, "cert3")
         self.assertEqual(cert1.cert, expected.RSA2048_3certs.certs[0])
         self.assertEqual(cert2.cert, expected.RSA2048_3certs.certs[1])
         self.assertEqual(cert3.cert, expected.RSA2048_3certs.certs[2])
-        self.assertEqual(store.store_type, "jks")
 
-    def test_custom_entry_passwords(self):
-        store = jks.KeyStore.load(KS_PATH + "/jks/custom_entry_passwords.jks", "store_password")
-        self.assertEqual(store.store_type, "jks")
-        self.assertEqual(len(store.entries), 2)
+    def test_certs(self):
+        self._test_certs("jks")
+        self._test_certs("jceks")
+
+    def _test_custom_entry_passwords(self, store_type):
+        store = jks.KeyStore.load(KS_PATH + "/{0}/custom_entry_passwords.{0}".format(store_type), "store_password")
+        self.assertEqual(store.store_type, store_type)
+        self.assertEqual(len(store.entries), 3 if store_type == "jceks" else 2)
         self.assertEqual(len(store.certs), 1)
         self.assertEqual(len(store.private_keys), 1)
-        self.assertEqual(len(store.secret_keys), 0)
+        self.assertEqual(len(store.secret_keys), 1 if store_type == "jceks" else 0)
 
         pk = self.find_private_key(store, "private")
         self.assertRaises(jks.DecryptionFailureException, pk.decrypt, "wrong_password")
@@ -146,8 +180,26 @@ class JksTests(AbstractTest):
         cert = self.find_cert(store, "cert")
         self.assertEqual(cert.cert, expected.custom_entry_passwords.certs[0])
 
+        # JCEKS version of this store additionally contains a SecretKey
+        if store_type == "jceks":
+            sk = self.find_secret_key(store, "secret")
+            self.assertRaises(jks.DecryptionFailureException, sk.decrypt, "wrong_password")
+            sk.decrypt("secret_password")
+            self.assertTrue(sk.is_decrypted())
+            self.assertEqual(sk.key, b"\x3f\x68\x05\x04\xc6\x6c\xc2\x5a\xae\x65\xd0\xfa\x49\xc5\x26\xec")
+            self.assertEqual(sk.algorithm, "AES")
+            self.assertEqual(sk.key_size, 128)
+
+    def test_custom_entry_passwords(self):
+        self._test_custom_entry_passwords("jks")
+        self._test_custom_entry_passwords("jceks")
+
+    def _test_duplicate_aliases(self, store_type):
+        self.assertRaises(jks.DuplicateAliasException, jks.KeyStore.load, KS_PATH + "/{0}/duplicate_aliases.{0}".format(store_type), "12345678")
+
     def test_duplicate_aliases(self):
-        self.assertRaises(jks.DuplicateAliasException, jks.KeyStore.load, KS_PATH + "/jks/duplicate_aliases.jks", "12345678")
+        self._test_duplicate_aliases("jks")
+        self._test_duplicate_aliases("jceks")
 
     def test_non_ascii_jks_password(self):
         store = jks.KeyStore.load(KS_PATH + "/jks/non_ascii_password.jks", u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029")
@@ -155,6 +207,10 @@ class JksTests(AbstractTest):
         self.assertEqual(store.store_type, "jks")
         self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.jks_non_ascii_password.private_key, expected.jks_non_ascii_password.certs)
 
+class JksAndJceksSaveTests(AbstractTest):
+    """
+    Test cases that apply to writing either JKS or JCEKS stores.
+    """
     def test_load_and_save_rsa_keystore(self):
         with open(KS_PATH + "/jks/RSA2048_3certs.jks", 'rb') as file:
             keystore_bytes = file.read()
@@ -302,89 +358,10 @@ class JksTests(AbstractTest):
         sk = self.find_secret_key(store, "mykey")
         self.assertRaises(jks.util.UnsupportedKeystoreEntryTypeException, jks.KeyStore.new, 'jks', [sk])
 
-class JceTests(AbstractTest):
-    def test_empty_store(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/empty.jceks", "")
-        self.assertEqual(store.store_type, "jceks")
-        self.assertEqual(len(store.entries), 0)
-
-    def test_bad_keystore_format(self):
-        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\x00\x00\x00\x00", "") # bad magic bytes
-        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\xCE\xCE\xCE\xCE\x00", "") # insufficient store version bytes
-        self.assertRaises(jks.util.UnsupportedKeystoreVersionException, jks.KeyStore.loads, b"\xCE\xCE\xCE\xCE\x00\x00\x00\x00", "") # unknown store version
-        self.assertRaises(jks.util.KeystoreSignatureException, jks.KeyStore.loads, b"\xCE\xCE\xCE\xCE\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*20, "") # bad signature
-        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads, b"\xCE\xCE\xCE\xCE\x00\x00\x00\x02\x00\x00\x00\x00" + b"\x00"*19, "") # insufficient signature bytes
-
-        self.assertRaises(jks.util.BadKeystoreFormatException, jks.KeyStore.loads,
-            b"\xCE\xCE\xCE\xCE\x00\x00\x00\x02\x00\x00\x00\x01"
-            b"\x00\x00\x00\x02" b"\x00\x05" b"\xFF\xFF\xFF\xFF\xFF", "") # bad alias UTF-8 data
-
-    def test_trailing_data(self):
-        """Issue #21 on github; Portecle is able to load keystores with trailing data after the hash, so we should be as well."""
-        store_bytes = None
-        with open(KS_PATH + "/jceks/RSA1024.jceks", "rb") as f:
-            store_bytes = f.read()
-        store = jks.KeyStore.loads(store_bytes + b"\x00"*1,    "12345678")
-        store = jks.KeyStore.loads(store_bytes + b"\x00"*1000, "12345678")
-
-    def test_rsa_1024(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/RSA1024.jceks", "12345678")
-        pk = self.find_private_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.RSA1024.private_key, expected.RSA1024.certs)
-
-    def test_rsa_2048_3certs(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/RSA2048_3certs.jceks", "12345678")
-        pk = self.find_private_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.RSA2048_3certs.private_key, expected.RSA2048_3certs.certs)
-
-    def test_dsa_2048(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/DSA2048.jceks", "12345678")
-        pk = self.find_private_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_pkey_and_certs_equal(pk, jks.util.DSA_OID, expected.DSA2048.private_key, expected.DSA2048.certs)
-
-    def test_certs(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/3certs.jceks", "12345678")
-        cert1 = self.find_cert(store, "cert1")
-        cert2 = self.find_cert(store, "cert2")
-        cert3 = self.find_cert(store, "cert3")
-        self.assertEqual(cert1.cert, expected.RSA2048_3certs.certs[0])
-        self.assertEqual(cert2.cert, expected.RSA2048_3certs.certs[1])
-        self.assertEqual(cert3.cert, expected.RSA2048_3certs.certs[2])
-        self.assertEqual(store.store_type, "jceks")
-
-    def test_custom_entry_passwords(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/custom_entry_passwords.jceks", "store_password") # shouldn't throw, we're not yet trying to decrypt anything at this point
-        self.assertEqual(store.store_type, "jceks")
-        self.assertEqual(len(store.entries), 3)
-        self.assertEqual(len(store.certs), 1)
-        self.assertEqual(len(store.private_keys), 1)
-        self.assertEqual(len(store.secret_keys), 1)
-
-        pk = self.find_private_key(store, "private")
-        self.assertRaises(jks.DecryptionFailureException, pk.decrypt, "wrong_password")
-        self.assertTrue(not pk.is_decrypted())
-        pk.decrypt("private_password")
-        self.assertTrue(pk.is_decrypted())
-        self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.custom_entry_passwords.private_key, expected.custom_entry_passwords.certs)
-
-        sk = self.find_secret_key(store, "secret")
-        self.assertRaises(jks.DecryptionFailureException, sk.decrypt, "wrong_password")
-        sk.decrypt("secret_password")
-        self.assertTrue(sk.is_decrypted())
-        self.assertEqual(sk.key, b"\x3f\x68\x05\x04\xc6\x6c\xc2\x5a\xae\x65\xd0\xfa\x49\xc5\x26\xec")
-        self.assertEqual(sk.algorithm, "AES")
-        self.assertEqual(sk.key_size, 128)
-
-        cert = self.find_cert(store, "cert")
-        self.assertEqual(cert.cert, expected.custom_entry_passwords.certs[0])
-
-    def test_duplicate_aliases(self):
-        self.assertRaises(jks.DuplicateAliasException, jks.KeyStore.load, KS_PATH + "/jceks/duplicate_aliases.jceks", "12345678")
-
-class JceSecretKeyTests(AbstractTest):
+class JceSecretKeyLoadTests(AbstractTest):
+    """
+    Tests specifically involving reading SecretKeys in JCEKS keystores
+    """
     def test_des_secret_key(self):
         store = jks.KeyStore.load(KS_PATH + "/jceks/DES.jceks", "12345678")
         sk = self.find_secret_key(store, "mykey")
