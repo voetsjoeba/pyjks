@@ -1,5 +1,67 @@
 # vim: set et ai ts=4 sts=4 sw=4:
+from pyasn1.codec.ber import encoder, decoder
+from pyasn1_modules import rfc5208, rfc2459
+from pyasn1.type import univ
 from .util import *
+
+# basic value types that can be entered into keystores through respective entries
+
+class TrustedCertificate(object):
+    def __init__(self, type, cert):
+        if not isinstance(type, py23basestring):
+            raise Exception("Bad data type") # TODO
+        if not isinstance(cert, bytes):
+            raise Exception("Bad data type") # TODO
+        self.type = type
+        self.cert = cert
+
+class PublicKey(object):
+    def __init__(self, key_info):
+        spki = decoder.decode(key_info, asn1Spec=rfc2459.SubjectPublicKeyInfo())[0]
+        self.key_info = key_info
+        self.key = bitstring_to_bytes(spki['subjectPublicKey'])
+        self.algorithm_oid = spki['algorithm']['algorithm'].asTuple()
+
+class PrivateKey(object):
+    def __init__(self, key, certs, key_format='pkcs8'):
+        self.certs = certs
+        self.key = None
+        self.key_pkcs8 = None
+        self.algorithm_oid = None
+
+        if not all(isinstance(c, TrustedCertificate) for c in self.certs):
+            raise ValueError("certs argument must be a list of TrustedCertificate instances")
+
+        if key_format == 'pkcs8':
+            private_key_info = decoder.decode(key, asn1Spec=rfc5208.PrivateKeyInfo())[0]
+
+            self.algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
+            self.key = private_key_info['privateKey'].asOctets()
+            self.key_pkcs8 = key
+
+        elif key_format == 'rsa_raw':
+            self.algorithm_oid = RSA_ENCRYPTION_OID
+
+            # We must encode it to pkcs8
+            private_key_info = rfc5208.PrivateKeyInfo()
+            private_key_info.setComponentByName('version','v1')
+            a = rfc2459.AlgorithmIdentifier()
+            a.setComponentByName('algorithm', self.algorithm_oid)
+            a.setComponentByName('parameters', univ.Null())
+            private_key_info.setComponentByName('privateKeyAlgorithm', a)
+            private_key_info.setComponentByName('privateKey', key)
+
+            self.key_pkcs8 = encoder.encode(private_key_info)
+            self.key = key
+
+        else:
+            raise UnsupportedKeyFormatException("Key Format '%s' is not supported" % key_format)
+
+class SecretKey(object):
+    def __init__(self, key, algorithm):
+        self.key = key
+        self.key_size = len(self.key)*8
+        self.algorithm = algorithm
 
 class AbstractKeystore(object):
     """
@@ -65,6 +127,8 @@ class AbstractKeystore(object):
 
     @classmethod
     def _write_data(cls, data):
+        if not isinstance(data, bytes):
+            raise Exception("data must be a bytes instance")
         size = len(data)
         if size > 0xFFFFFFFF:
             raise BadDataLengthException("Cannot write binary data; length exceeds maximum size")
@@ -72,26 +136,56 @@ class AbstractKeystore(object):
         result += data
         return result
 
-class AbstractKeystoreEntry(object):
-    """Abstract superclass for keystore entries."""
-    def __init__(self, **kwargs):
-        super(AbstractKeystoreEntry, self).__init__()
-        self.store_type = kwargs.get("store_type")
-        self.alias = kwargs.get("alias")
-        self.timestamp = kwargs.get("timestamp")
+    @classmethod
+    def _read_alias_and_timestamp(cls, data, pos):
+        alias, pos = cls._read_utf(data, pos, kind="entry alias")
+        timestamp = int(b8.unpack_from(data, pos)[0]); pos += 8 # milliseconds since UNIX epoch
+        return (alias, timestamp, pos)
 
     @classmethod
-    def new(cls, alias):
-        """
-        Helper function to create a new KeyStoreEntry.
-        """
-        raise NotImplementedError("Abstract method")
+    def _write_alias_and_timestamp(cls, alias, timestamp):
+        result = cls._write_utf(alias)
+        result += b8.pack(timestamp)
+        return result
+
+    @classmethod
+    def _read_trusted_cert(cls, data, pos):
+        cert_type, pos = cls._read_utf(data, pos, kind="certificate type")
+        cert_data, pos = cls._read_data(data, pos)
+        tcert = TrustedCertificate(cert_type, cert_data)
+        return tcert, pos
+
+    @classmethod
+    def _write_trusted_cert(cls, tcert):
+        # TODO: assert that tcert is a TrustedCertificate (and not a TrustedCertificateEntry) (programming error otherwise)
+        result = cls._write_utf(tcert.type)
+        result += cls._write_data(tcert.cert)
+        return result
+
+class AbstractKeystoreEntry(object):
+    """
+    Abstract superclass for keystore entries. Represents a stored value in a keystore, and its associated alias and timestamp.
+    """
+    def __init__(self, alias, timestamp, store_type):
+        super(AbstractKeystoreEntry, self).__init__()
+        self.alias = alias
+        self.timestamp = timestamp
+        self.store_type = store_type
+        self._encrypted_form = None
+        self._plaintext_form = None
+        # TODO: should there be a .type field here, so users can look at the type of an entry more easily?
+
+    @property
+    def item(self):
+        if not self.is_decrypted():
+            raise NotYetDecryptedException("Cannot access decrypted item; entry not yet decrypted, call decrypt() with the correct password first")
+        return self._plaintext_form
 
     def is_decrypted(self):
         """
         Returns ``True`` if the entry has already been decrypted, ``False`` otherwise.
         """
-        raise NotImplementedError("Abstract method")
+        return (not self._encrypted_form)
 
     def decrypt(self, key_password):
         """

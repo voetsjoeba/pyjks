@@ -31,8 +31,7 @@ import hashlib
 import javaobj
 import time
 from pyasn1.codec.ber import encoder, decoder
-from pyasn1_modules import rfc5208
-from pyasn1_modules.rfc2459 import AlgorithmIdentifier
+from pyasn1_modules import rfc5208, rfc2459
 from pyasn1.type import univ, namedtype
 from . import rfc2898
 from . import sun_crypto
@@ -48,146 +47,38 @@ MAGIC_NUMBER_JKS = b4.pack(0xFEEDFEED)
 MAGIC_NUMBER_JCEKS = b4.pack(0xCECECECE)
 SIGNATURE_WHITENING = b"Mighty Aphrodite"
 
-
 class TrustedCertEntry(AbstractKeystoreEntry):
     """Represents a trusted certificate entry in a JKS or JCEKS keystore."""
 
-    def __init__(self, **kwargs):
-        super(TrustedCertEntry, self).__init__(**kwargs)
-        self.type = kwargs.get("type")
-        """A string indicating the type of certificate. Unless in exotic applications, this is usually ``X.509``."""
-        self.cert = kwargs.get("cert")
-        """A byte string containing the actual certificate data. In the case of X.509 certificates, this is the DER-encoded
-        X.509 representation of the certificate."""
-
-    @classmethod
-    def new(cls, alias, cert):
-        """
-        Helper function to create a new TrustedCertEntry.
-
-        :param str alias: The alias for the Trusted Cert Entry
-        :param str certs: The certificate, as a byte string.
-
-        :returns: A loaded :class:`TrustedCertEntry` instance, ready
-          to be placed in a keystore.
-        """
-        timestamp = int(time.time()) * 1000
-
-        tke = cls(timestamp = timestamp,
-                               alias = alias,
-                               cert = cert)
-        return tke
-
-    def is_decrypted(self):
-        """Always returns ``True`` for this entry type."""
-        return True
+    def __init__(self, alias, timestamp, store_type, tcert):
+        super(TrustedCertEntry, self).__init__(alias, timestamp, store_type)
+        # TODO: check that tcert is a TrustedCertificate
+        self._plaintext_form = tcert
 
     def decrypt(self, key_password):
-        """Does nothing for this entry type; certificates are inherently public data and are not stored in encrypted form."""
         return
-
     def encrypt(self, key_password):
-        """Does nothing for this entry type; certificates are inherently public data and are not stored in encrypted form."""
         return
 
 class PrivateKeyEntry(AbstractKeystoreEntry):
     """Represents a private key entry in a JKS or JCEKS keystore (e.g. an RSA or DSA private key)."""
 
-    def __init__(self, **kwargs):
-        super(PrivateKeyEntry, self).__init__(**kwargs)
-        self.cert_chain = kwargs.get("cert_chain")
-        """
-        A list of tuples, representing the certificate chain associated with the private key. Each element of the list is a 2-tuple
-        containing the following data:
-
-            - ``[0]``: A string indicating the type of certificate. Unless in exotic applications, this is usually ``X.509``.
-            - ``[1]``: A byte string containing the actual certificate data. In the case of X.509 certificates, this is the DER-encoded X.509 representation of the certificate.
-        """
-
-        self._encrypted = kwargs.get("encrypted")
-        self._pkey = kwargs.get("pkey")
-        self._pkey_pkcs8 = kwargs.get("pkey_pkcs8")
-        self._algorithm_oid = kwargs.get("algorithm_oid")
-
-    @classmethod
-    def new(cls, alias, certs, key, key_format='pkcs8'):
-        """
-        Helper function to create a new PrivateKeyEntry.
-
-        :param str alias: The alias for the Private Key Entry
-        :param list certs: An list of certificates, as byte strings.
-          The first one should be the one belonging to the private key,
-          the others the chain (in correct order).
-        :param str key: A byte string containing the private key in the
-          format specified in the key_format parameter (default pkcs8).
-        :param str key_format: The format of the provided private key.
-          Valid options are pkcs8 or rsa_raw. Defaults to pkcs8.
-
-        :returns: A loaded :class:`PrivateKeyEntry` instance, ready
-          to be placed in a keystore.
-
-        :raises UnsupportedKeyFormatException: If the key format is
-          unsupported.
-        """
-        timestamp = int(time.time()) * 1000
-
-        cert_chain = []
-        for cert in certs:
-            cert_chain.append(('X.509', cert))
-
-        pke = cls(timestamp = timestamp,
-                               alias = alias,
-                               cert_chain = cert_chain)
-
-        if key_format == 'pkcs8':
-            private_key_info = decoder.decode(key, asn1Spec=rfc5208.PrivateKeyInfo())[0]
-
-            pke._algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
-            pke.pkey = private_key_info['privateKey'].asOctets()
-            pke.pkey_pkcs8 = key
-
-        elif key_format == 'rsa_raw':
-            pke._algorithm_oid = RSA_ENCRYPTION_OID
-
-            # We must encode it to pkcs8
-            private_key_info = rfc5208.PrivateKeyInfo()
-            private_key_info.setComponentByName('version','v1')
-            a = AlgorithmIdentifier()
-            a.setComponentByName('algorithm', pke._algorithm_oid)
-            a.setComponentByName('parameters', univ.Null())
-            private_key_info.setComponentByName('privateKeyAlgorithm', a)
-            private_key_info.setComponentByName('privateKey', key)
-
-            pke.pkey_pkcs8 = encoder.encode(private_key_info)
-            pke.pkey = key
-
+    def __init__(self, alias, timestamp, store_type, pkey, certs=None):
+        super(PrivateKeyEntry, self).__init__(alias, timestamp, store_type)
+        if isinstance(pkey, PrivateKey):
+            self.certs = None
+            self._plaintext_form = pkey
+        elif isinstance(pkey, (bytes, bytearray)):
+            self.certs = (certs or []) # certs are not involved in encryption/decryption, keep these separately
+            self._encrypted_form = pkey
         else:
-            raise UnsupportedKeyFormatException("Key Format '%s' is not supported" % key_format)
-
-        return pke
-
-    def __getattr__(self, name):
-        if not self.is_decrypted():
-            raise NotYetDecryptedException("Cannot access attribute '%s'; entry not yet decrypted, call decrypt() with the correct password first" % name)
-        return self.__dict__['_' + name]
-
-    def is_decrypted(self):
-        return (not self._encrypted)
+            raise Exception("Invalid private key value; must be a PrivateKey instance or an encrypted bytes form")
 
     def decrypt(self, key_password):
-        """
-        Decrypts the entry using the given password. Has no effect if the entry has already been decrypted.
-
-        :param str key_password: The password to decrypt the entry with. If the entry was loaded from a JCEKS keystore,
-                                 the password must not contain any characters outside of the ASCII character set.
-        :raises DecryptionFailureException: If the entry could not be decrypted using the given password.
-        :raises UnexpectedAlgorithmException: If the entry was encrypted with an unknown or unexpected algorithm
-        :raise ValueError: If the entry was loaded from a JCEKS keystore and the password contains non-ASCII characters.
-        """
         if self.is_decrypted():
             return
 
-        encrypted_info = decoder.decode(self._encrypted, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())[0]
+        encrypted_info = decoder.decode(self._encrypted_form, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())[0]
         algo_id = encrypted_info['encryptionAlgorithm']['algorithm'].asTuple()
         algo_params = encrypted_info['encryptionAlgorithm']['parameters'].asOctets()
         encrypted_private_key = encrypted_info['encryptedData'].asOctets()
@@ -212,103 +103,80 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
             raise DecryptionFailureException("Failed to decrypt data for private key '%s'; wrong password?" % self.alias)
 
         # at this point, 'plaintext' is a PKCS#8 PrivateKeyInfo (see RFC 5208)
-        private_key_info = decoder.decode(plaintext, asn1Spec=rfc5208.PrivateKeyInfo())[0]
-        key = private_key_info['privateKey'].asOctets()
-        algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
-
-        self._encrypted = None
-        self._pkey = key
-        self._pkey_pkcs8 = plaintext
-        self._algorithm_oid = algorithm_oid
+        self._encrypted_form = None
+        self._plaintext_form = PrivateKey(plaintext, self.certs, key_format='pkcs8')
+        self.certs = None # PrivateKey object now contains the definitive certificate list
 
     def encrypt(self, key_password):
-        """
-        Encrypts the private key, so that it can be saved to a keystore.
-
-        This will make it necessary to decrypt it again if it is going to be used later.
-        Has no effect if the entry is already encrypted.
-
-        :param str key_password: The password to encrypt the entry with.
-        """
         if not self.is_decrypted():
             return
 
-        encrypted_private_key = sun_crypto.jks_pkey_encrypt(self.pkey_pkcs8, key_password)
+        pk = self._plaintext_form # PrivateKey instance
 
-        a = AlgorithmIdentifier()
-        a.setComponentByName('algorithm', sun_crypto.SUN_JKS_ALGO_ID)
-        a.setComponentByName('parameters', univ.Null())
+        ciphertext = None
+        a = rfc2459.AlgorithmIdentifier()
+
+        if self.store_type == "jks":
+            ciphertext = sun_crypto.jks_pkey_encrypt(pk.key_pkcs8, key_password)
+            a.setComponentByName('algorithm', sun_crypto.SUN_JKS_ALGO_ID)
+            a.setComponentByName('parameters', univ.Null())
+
+        elif self.store_type == "jceks":
+            ciphertext, salt, iteration_count = sun_crypto.jce_pbe_encrypt(pk.key_pkcs8, key_password)
+
+            pbe_params = rfc2898.PBEParameter()
+            pbe_params.setComponentByName('salt', salt)
+            pbe_params.setComponentByName('iterationCount', iteration_count)
+
+            a.setComponentByName('algorithm', sun_crypto.SUN_JCE_ALGO_ID)
+            a.setComponentByName('parameters', encoder.encode(pbe_params))
+        else:
+            raise UnsupportedKeystoreTypeException("Cannot encrypt entries of this type for storage in '%s' keystores; can only encrypt for JKS and JCEKS stores" % (self.store_type,))
+
         epki = rfc5208.EncryptedPrivateKeyInfo()
-        epki.setComponentByName('encryptionAlgorithm',a)
-        epki.setComponentByName('encryptedData', encrypted_private_key)
+        epki.setComponentByName('encryptionAlgorithm', a)
+        epki.setComponentByName('encryptedData', ciphertext)
 
-        self._encrypted = encoder.encode(epki)
-        self._pkey = None
-        self._pkey_pkcs8 = None
-        self._algorithm_oid = None
-
-    is_decrypted.__doc__ = AbstractKeystoreEntry.is_decrypted.__doc__
-
+        self.certs = pk.certs # TODO: write test case for the absence of this line (e.g. if the user loads a PrivateKeyEntry, grabs the PrivateKey, modifies its .certs to a different list, and then re-saves it to the store)
+        self._encrypted_form = encoder.encode(epki)
+        self._plaintext_form = None
 
 class SecretKeyEntry(AbstractKeystoreEntry):
     """Represents a secret (symmetric) key entry in a JCEKS keystore (e.g. an AES or DES key)."""
 
-    def __init__(self, **kwargs):
-        super(SecretKeyEntry, self).__init__(**kwargs)
-        self._encrypted = kwargs.get("sealed_obj")
-        self._algorithm = kwargs.get("algorithm")
-        self._key = kwargs.get("key")
-        self._key_size = kwargs.get("key_size")
-
-    @classmethod
-    def new(cls, alias, sealed_obj, algorithm, key, key_size):
-        """
-        Helper function to create a new SecretKeyEntry.
-
-        :returns: A loaded :class:`SecretKeyEntry` instance, ready
-          to be placed in a keystore.
-        """
-        timestamp = int(time.time()) * 1000
-
-        raise NotImplementedError("Creating Secret Keys not implemented")
-
-    def __getattr__(self, name):
-        if not self.is_decrypted():
-            raise NotYetDecryptedException("Cannot access attribute '%s'; entry not yet decrypted, call decrypt() with the correct password first" % name)
-        return self.__dict__['_' + name]
-
-    def is_decrypted(self):
-        return (not self._encrypted)
+    def __init__(self, alias, timestamp, store_type, skey):
+        super(SecretKeyEntry, self).__init__(alias, timestamp, store_type)
+        if isinstance(skey, SecretKey):
+            self._plaintext_form = skey
+        elif isinstance(skey, javaobj.JavaObject):
+            self._encrypted_form = skey
+        else:
+            raise Exception("Invalid secret key value; must be a SecretKey instance or an Java SealedObject instance")
 
     def decrypt(self, key_password):
-        """
-        Decrypts the entry using the given password. Has no effect if the entry has already been decrypted.
-
-        :param str key_password: The password to decrypt the entry with. Must not contain any characters outside
-                                 of the ASCII character set.
-        :raises DecryptionFailureException: If the entry could not be decrypted using the given password.
-        :raises UnexpectedAlgorithmException: If the entry was encrypted with an unknown or unexpected algorithm
-        :raise ValueError: If the password contains non-ASCII characters.
-        """
         if self.is_decrypted():
             return
 
         plaintext = None
-        sealed_obj = self._encrypted
+        sealed_obj = self._encrypted_form
+
+        encryptedContent = None if sealed_obj.encryptedContent is None else java_bytestring(sealed_obj.encryptedContent)
+        encodedParams    = None if sealed_obj.encodedParams is None else java_bytestring(sealed_obj.encodedParams)
+
         if sealed_obj.sealAlg == "PBEWithMD5AndTripleDES":
             # if the object was sealed with PBEWithMD5AndTripleDES
             # then the parameters should apply to the same algorithm
             # and not be empty or null
             if sealed_obj.paramsAlg != sealed_obj.sealAlg:
                 raise UnexpectedAlgorithmException("Unexpected parameters algorithm used in SealedObject; should match sealing algorithm '%s' but found '%s'" % (sealed_obj.sealAlg, sealed_obj.paramsAlg))
-            if sealed_obj.encodedParams is None or len(sealed_obj.encodedParams) == 0:
+            if encodedParams is None or len(encodedParams) == 0:
                 raise UnexpectedJavaTypeException("No parameters found in SealedObject instance for sealing algorithm '%s'; need at least a salt and iteration count to decrypt" % sealed_obj.sealAlg)
 
-            params_asn1 = decoder.decode(sealed_obj.encodedParams, asn1Spec=rfc2898.PBEParameter())[0]
+            params_asn1 = decoder.decode(encodedParams, asn1Spec=rfc2898.PBEParameter())[0]
             salt = params_asn1['salt'].asOctets()
             iteration_count = int(params_asn1['iterationCount'])
             try:
-                plaintext = sun_crypto.jce_pbe_decrypt(sealed_obj.encryptedContent, key_password, salt, iteration_count)
+                plaintext = sun_crypto.jce_pbe_decrypt(encryptedContent, key_password, salt, iteration_count)
             except sun_crypto.BadPaddingException:
                 raise DecryptionFailureException("Failed to decrypt data for secret key '%s'; bad password?" % self.alias)
         else:
@@ -354,12 +222,8 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         else:
             raise UnexpectedJavaTypeException("Unexpected object of type '%s' found inside SealedObject; don't know how to handle it" % clazz.name)
 
-        self._encrypted = None
-        self._algorithm = algorithm
-        self._key = key
-        self._key_size = key_size
-
-    is_decrypted.__doc__ = AbstractKeystoreEntry.is_decrypted.__doc__
+        self._encrypted_form = None
+        self._plaintext_form = SecretKey(key, algorithm)
 
     def encrypt(self, key_password):
         """
@@ -501,22 +365,18 @@ class KeyStore(AbstractKeystore):
             pos = 12
             for i in range(entry_count):
                 tag = b4.unpack_from(data, pos)[0]; pos += 4
-                alias, pos = cls._read_utf(data, pos, kind="entry alias")
-                timestamp = int(b8.unpack_from(data, pos)[0]); pos += 8 # milliseconds since UNIX epoch
 
+                entry = None
                 if tag == cls.ENTRY_TYPE_PRIVATE_KEY:
-                    entry, pos = cls._read_private_key(data, pos, store_type)
+                    entry, pos = cls._read_private_key_entry(data, pos, store_type)
                 elif tag == cls.ENTRY_TYPE_CERTIFICATE:
-                    entry, pos = cls._read_trusted_cert(data, pos, store_type)
+                    entry, pos = cls._read_trusted_cert_entry(data, pos, store_type)
                 elif tag == cls.ENTRY_TYPE_SECRET_KEY:
                     if store_type != "jceks":
                         raise BadKeystoreFormatException("Unexpected entry tag {0} encountered in JKS keystore; only supported in JCEKS keystores".format(tag))
-                    entry, pos = cls._read_secret_key(data, pos, store_type)
+                    entry, pos = cls._read_secret_key_entry(data, pos, store_type)
                 else:
                     raise BadKeystoreFormatException("Unexpected keystore entry tag %d", tag)
-
-                entry.alias = alias
-                entry.timestamp = timestamp
 
                 if try_decrypt_keys:
                     try:
@@ -524,9 +384,9 @@ class KeyStore(AbstractKeystore):
                     except DecryptionFailureException:
                         pass # ok, let user call decrypt() manually
 
-                if alias in entries:
-                    raise DuplicateAliasException("Found duplicate alias '%s'" % alias)
-                entries[alias] = entry
+                if entry.alias in entries:
+                    raise DuplicateAliasException("Found duplicate alias '%s'" % entry.alias)
+                entries[entry.alias] = entry
 
         except struct.error as e:
             raise BadKeystoreFormatException(e)
@@ -576,12 +436,12 @@ class KeyStore(AbstractKeystore):
         keystore += b4.pack(2) # version 2
         keystore += b4.pack(len(self.entries))
 
-        for alias, item in self.entries.items():
-            if isinstance(item, TrustedCertEntry):
-                keystore += self._write_trusted_cert(alias, item)
-            elif isinstance(item, PrivateKeyEntry):
-                keystore += self._write_private_key(alias, item, store_password)
-            elif isinstance(item, SecretKeyEntry):
+        for alias, entry in self.entries.items():
+            if isinstance(entry, TrustedCertEntry):
+                keystore += self._write_trusted_cert_entry(entry)
+            elif isinstance(entry, PrivateKeyEntry):
+                keystore += self._write_private_key_entry(entry, store_password)
+            elif isinstance(entry, SecretKeyEntry):
                 if self.store_type != 'jceks':
                     raise UnsupportedKeystoreEntryTypeException('Secret Key only allowed in JCEKS keystores')
                 raise NotImplementedError("Saving of Secret Keys not implemented")
@@ -599,50 +459,49 @@ class KeyStore(AbstractKeystore):
         super(KeyStore, self).__init__(store_type, entries)
 
     @property
-    def certs(self):
+    def cert_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
         those entries of type :class:`TrustedCertEntry`."""
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, TrustedCertEntry)])
 
     @property
-    def secret_keys(self):
+    def secret_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
         those entries of type :class:`SecretKeyEntry`."""
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, SecretKeyEntry)])
 
     @property
-    def private_keys(self):
+    def private_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
         those entries of type :class:`PrivateKeyEntry`."""
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, PrivateKeyEntry)])
 
     @classmethod
-    def _read_trusted_cert(cls, data, pos, store_type):
-        cert_type, pos = cls._read_utf(data, pos, kind="certificate type")
-        cert_data, pos = cls._read_data(data, pos)
-        entry = TrustedCertEntry(type=cert_type, cert=cert_data, store_type=store_type)
+    def _read_trusted_cert_entry(cls, data, pos, store_type):
+        alias, timestamp, pos = cls._read_alias_and_timestamp(data, pos)
+        tcert, pos            = cls._read_trusted_cert(data, pos)
+        entry = TrustedCertEntry(alias, timestamp, store_type, tcert)
         return entry, pos
 
     @classmethod
-    def _read_private_key(cls, data, pos, store_type):
-        ber_data, pos = cls._read_data(data, pos)
-        chain_len = b4.unpack_from(data, pos)[0]
-        pos += 4
+    def _read_private_key_entry(cls, data, pos, store_type):
+        alias, timestamp, pos = cls._read_alias_and_timestamp(data, pos)
+        ber_data, pos         = cls._read_data(data, pos)
+        chain_len             = b4.unpack_from(data, pos)[0]; pos += 4
 
         cert_chain = []
         for j in range(chain_len):
-            cert_type, pos = cls._read_utf(data, pos, kind="certificate type")
-            cert_data, pos = cls._read_data(data, pos)
-            cert_chain.append((cert_type, cert_data))
+            tcert, pos = cls._read_trusted_cert(data, pos)
+            cert_chain.append(tcert)
 
-        entry = PrivateKeyEntry(cert_chain=cert_chain, encrypted=ber_data, store_type=store_type)
+        entry = PrivateKeyEntry(alias, timestamp, store_type, ber_data, certs=cert_chain)
         return entry, pos
 
     @classmethod
-    def _read_secret_key(cls, data, pos, store_type):
+    def _read_secret_key_entry(cls, data, pos, store_type):
         # SecretKeys are stored in the key store file through Java's
         # serialization mechanism, i.e. as an actual serialized Java
         # object embedded inside the file. The objects that get stored
@@ -679,17 +538,13 @@ class KeyStore(AbstractKeystore):
         #   private String sealAlg;                  # The algorithm that was used to seal this object.
         #   private String paramsAlg;                # The algorithm of the parameters used.
         #   protected byte[] encodedParams;          # The cryptographic parameters used by the sealing Cipher, encoded in the default format.
+        alias, timestamp, pos = cls._read_alias_and_timestamp(data, pos)
 
         sealed_obj, pos = cls._read_java_obj(data, pos, ignore_remaining_data=True)
         if not java_is_subclass(sealed_obj, "javax.crypto.SealedObject"):
             raise UnexpectedJavaTypeException("Unexpected sealed object type '%s'; not a subclass of javax.crypto.SealedObject" % sealed_obj.get_class().name)
 
-        if sealed_obj.encryptedContent:
-            sealed_obj.encryptedContent = java_bytestring(sealed_obj.encryptedContent)
-        if sealed_obj.encodedParams:
-            sealed_obj.encodedParams = java_bytestring(sealed_obj.encodedParams)
-
-        entry = SecretKeyEntry(sealed_obj=sealed_obj, store_type=store_type)
+        entry = SecretKeyEntry(alias, timestamp, store_type, sealed_obj)
         return entry, pos
 
     @classmethod
@@ -701,26 +556,22 @@ class KeyStore(AbstractKeystore):
         return obj, pos + obj_size
 
     @classmethod
-    def _write_private_key(cls, alias, item, key_password):
-        private_key_entry = b4.pack(cls.ENTRY_TYPE_PRIVATE_KEY)
-        private_key_entry += cls._write_utf(alias)
-        private_key_entry += b8.pack(item.timestamp)
-        item.encrypt(key_password)
-        private_key_entry += cls._write_data(item._encrypted)
+    def _write_private_key_entry(cls, entry, key_password):
+        result = b4.pack(cls.ENTRY_TYPE_PRIVATE_KEY)
+        result += cls._write_alias_and_timestamp(entry.alias, entry.timestamp)
+        entry.encrypt(key_password)
+        result += cls._write_data(entry._encrypted_form)
 
-        private_key_entry += b4.pack(len(item.cert_chain))
-        for cert in item.cert_chain:
-            private_key_entry += cls._write_utf(cert[0])
-            private_key_entry += cls._write_data(cert[1])
+        result += b4.pack(len(entry.certs))
+        for tcert in entry.certs:
+            result += cls._write_trusted_cert(tcert)
 
-        return private_key_entry
+        return result
 
     @classmethod
-    def _write_trusted_cert(cls, alias, item):
-        trusted_cert = b4.pack(cls.ENTRY_TYPE_CERTIFICATE)
-        trusted_cert += cls._write_utf(alias)
-        trusted_cert += b8.pack(item.timestamp)
-        trusted_cert += cls._write_utf('X.509')
-        trusted_cert += cls._write_data(item.cert)
-        return trusted_cert
+    def _write_trusted_cert_entry(cls, entry):
+        result = b4.pack(cls.ENTRY_TYPE_CERTIFICATE)
+        result += cls._write_alias_and_timestamp(entry.alias, entry.timestamp)
+        result += cls._write_trusted_cert(entry.item)
+        return result
 

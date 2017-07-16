@@ -6,77 +6,60 @@ from pyasn1_modules import rfc5208, rfc2459
 from Crypto.Hash import HMAC, SHA
 from .util import *
 from .base import *
-from .jks import KeyStore, TrustedCertEntry
 from . import rfc7292
 
-class AbstractBksEntry(AbstractKeystoreEntry):
-    """Abstract superclass for BKS keystore entry types"""
-    def __init__(self, **kwargs):
-        super(AbstractBksEntry, self).__init__(**kwargs)
-        # All BKS entries can carry an arbitrary number of associated certificates
-        self.cert_chain = kwargs.get("cert_chain", [])
-        self._encrypted = kwargs.get("encrypted")
+# --- VALUE TYPES ---------------------------------------------------------------
 
-class BksTrustedCertEntry(TrustedCertEntry):
-    """Represents a trusted certificate entry in a BKS or UBER keystore."""
-    pass # identical
-
-class BksKeyEntry(AbstractBksEntry):
+class BksKey(object):
     """
-    Represents a non-encrypted cryptographic key (public, private or secret) stored in a BKS keystore.
-    May exceptionally appear as a top-level entry type in (very) old keystores, but you are most likely
-    to encounter these as the nested object inside a :class:`BksSealedKeyEntry` once decrypted.
+    Wrapper for different kinds of non-encrypted cryptographic keys found in BKS keystores.
     """
-    KEY_TYPE_PRIVATE = 0          #: Type indicator for private keys in :class:`BksKeyEntry`.
-    KEY_TYPE_PUBLIC = 1           #: Type indicator for public keys in :class:`BksKeyEntry`.
-    KEY_TYPE_SECRET = 2           #: Type indicator for secret keys in :class:`BksKeyEntry`. Indicates a key for use with a symmetric encryption algorithm.
+    KEY_TYPE_PRIVATE = 0
+    KEY_TYPE_PUBLIC = 1
+    KEY_TYPE_SECRET = 2
 
-    def __init__(self, type, format, algorithm, encoded, **kwargs):
-        super(BksKeyEntry, self).__init__(**kwargs)
+    def __init__(self, type, format, algorithm, key, certs=None):
+        super(BksKey, self).__init__()
         self.type = type
-        """An integer indicating the type of key: one of :const:`KEY_TYPE_PRIVATE`, :const:`KEY_TYPE_PUBLIC`, :const:`KEY_TYPE_SECRET`."""
-        self.format = format
-        """A string indicating the format or encoding in which the key is stored. One of: ``PKCS8``, ``PKCS#8``, ``X.509``, ``X509``, ``RAW``."""
         self.algorithm = algorithm
-        """A string indicating the algorithm for which the key is valid."""
-        self.encoded = encoded
-        """A byte string containing the key, formatted as indicated by the :attr:`format` attribute."""
 
         if self.type == self.KEY_TYPE_PRIVATE:
-            if self.format not in ["PKCS8", "PKCS#8"]:
-                raise UnexpectedKeyEncodingException("Unexpected encoding for private key entry: '%s'" % self.format)
-            # self.encoded is a PKCS#8 PrivateKeyInfo
-            private_key_info = decoder.decode(self.encoded, asn1Spec=rfc5208.PrivateKeyInfo())[0]
-            self.pkey_pkcs8 = self.encoded
-            self.pkey = private_key_info['privateKey'].asOctets()
-            self.algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
+            if format not in ["PKCS8", "PKCS#8"]:
+                raise UnexpectedKeyEncodingException("Unexpected encoding for private key entry: '%s'" % (format,))
+            self.key = PrivateKey(key, certs or [], key_format='pkcs8')
 
         elif self.type == self.KEY_TYPE_PUBLIC:
-            if self.format not in ["X.509", "X509"]:
-                raise UnexpectedKeyEncodingException("Unexpected encoding for public key entry: '%s'" % self.format)
-            # self.encoded is an X.509 SubjectPublicKeyInfo
-            spki = decoder.decode(self.encoded, asn1Spec=rfc2459.SubjectPublicKeyInfo())[0]
-            self.public_key_info = self.encoded
-            self.public_key = bitstring_to_bytes(spki['subjectPublicKey'])
-            self.algorithm_oid = spki['algorithm']['algorithm'].asTuple()
+            if format not in ["X.509", "X509"]:
+                raise UnexpectedKeyEncodingException("Unexpected encoding for public key entry: '%s'" % (format,))
+            self.key = PublicKey(key)
 
         elif self.type == self.KEY_TYPE_SECRET:
-            if self.format != "RAW":
-                raise UnexpectedKeyEncodingException("Unexpected encoding for raw key entry: '%s'" % self.format)
-            # self.encoded is an unwrapped/raw cryptographic key
-            self.key = encoded
-            self.key_size = len(encoded)*8
+            if format != "RAW":
+                raise UnexpectedKeyEncodingException("Unexpected encoding for secret key entry: '%s'" % (format,))
+            self.key = SecretKey(key, algorithm)
 
         else:
             raise UnexpectedKeyEncodingException("Key type %r not recognized" % (self.type,))
 
-    def is_decrypted(self):
-        """Always returns ``True`` for this entry type."""
-        return True
+    @classmethod
+    def create_from(cls, obj):
+        if isinstance(obj, PrivateKey):
+            return BksKey(cls.KEY_TYPE_PRIVATE, "PKCS8", cls._oid2algname(obj.algorithm_oid), obj.key_pkcs8, certs=obj.certs)
+        elif isinstance(obj, PublicKey):
+            return BksKey(cls.KEY_TYPE_PUBLIC, "X.509", cls._oid2algname(obj.algorithm_oid), obj.key_info)
+        elif isinstance(obj, SecretKey):
+            return BksKey(cls.KEY_TYPE_SECRET, "RAW", obj.algorithm, obj.key)
+        else:
+            raise ValueError("Don't know how to create a BksKey for objects of type %s" % (type(obj),))
 
-    def decrypt(self, key_password):
-        """Does nothing for this entry type; these entries are stored in non-encrypted form."""
-        pass
+    @classmethod
+    def _oid2algname(cls, oid):
+        if oid == rfc2459.rsaEncryption.asTuple():
+            return "RSA"
+        elif oid == rfc2459.id_dsa.asTuple():
+            return "DSA"
+        else:
+            return ".".join(str(x) for x in obj.algorithm_oid)
 
     @classmethod
     def type2str(cls, t):
@@ -94,6 +77,50 @@ class BksKeyEntry(AbstractBksEntry):
             return "SECRET"
         return None
 
+# --- ENTRY TYPES -------------------------------------------------
+
+class AbstractBksEntry(AbstractKeystoreEntry):
+    """
+    BKS entries are similar to JKS ones, but can additionally store an arbitrary number of public certificates associated with the key,
+    regardless of the underlying stored object (even if the underlying object is itself a certificate).
+    """
+    def __init__(self, alias, timestamp, store_type, cert_chain):
+        super(AbstractBksEntry, self).__init__(alias, timestamp, store_type)
+        self.cert_chain = cert_chain
+
+class BksTrustedCertEntry(AbstractBksEntry):
+    """
+    Represents a trusted certificate entry in a BKS or UBER keystore.
+    Note that even entries storing certificates can have an associated chain of certificates (may be empty).
+    """
+    def __init__(self, alias, timestamp, store_type, cert_chain, tcert):
+        super(BksTrustedCertEntry, self).__init__(alias, timestamp, store_type, cert_chain)
+        # TODO: check that tcert is a TrustedCertificate
+        self._plaintext_form = tcert
+
+    def is_decrypted(self):
+        return True
+    def decrypt(self, key_password):
+        return
+    def encrypt(self, key_password):
+        return
+
+class BksKeyEntry(AbstractBksEntry): # TODO: consider renaming this to BksPlainKeyEntry
+    """
+    Deprecated entry type storing BksKey objects in non-encrypted form.
+    Has been long since superceded by :class:`BksSealedKeyEntry` entries and are no longer retrievable or producable in recent BC versions,
+    but may exceptionally appear in (very) old keystores.
+    """
+    def __init__(self, alias, timestamp, store_type, cert_chain, bkskey):
+        super(BksKeyEntry, self).__init__(alias, timestamp, store_type, cert_chain)
+        self._plaintext_form = bkskey
+
+    def is_decrypted(self):
+        return True
+    def decrypt(self, key_password):
+        pass
+    def encrypt(self, key_password):
+        pass
 
 class BksSecretKeyEntry(AbstractBksEntry): # TODO: consider renaming this to SecretValueEntry, since it's arbitrary secret data
     """
@@ -116,48 +143,40 @@ class BksSecretKeyEntry(AbstractBksEntry): # TODO: consider renaming this to Sec
         for itself how to store it given the password supplied by the user. I.e., in this version of setKeyEntry it is left up to
         the keystore implementation to encode and protect the supplied Key object, instead of in advance by the user.
     """
-    def __init__(self, **kwargs):
-        super(BksSecretKeyEntry, self).__init__(**kwargs)
-        self.key = self._encrypted
-        """A byte string containing the secret key/value."""
+    def __init__(self, alias, timestamp, store_type, cert_chain, skey):
+        super(BksSecretKeyEntry, self).__init__(alias, timestamp, store_type, cert_chain)
+        # TODO: check that skey is a bytes or bytearray (no corresponding SecretKey instance, BKS doesn't store the algorithm name ...)
+        self._plaintext_form = skey
 
     def is_decrypted(self):
-        """Always returns ``True`` for this entry type."""
         return True
-
     def decrypt(self, key_password):
-        """Does nothing for this entry type; these entries stored arbitrary user-supplied data, unclear how to decrypt (may not be encrypted at all)."""
+        pass
+    def encrypt(self, key_password):
         pass
 
 class BksSealedKeyEntry(AbstractBksEntry):
     """
-    PBEWithSHAAnd3-KeyTripleDES-CBC-encrypted wrapper around a :class:`BksKeyEntry`. The contained key type is unknown until decrypted.
-
-    Once decrypted, objects of this type can be used in the same way as :class:`BksKeyEntry`: attribute accesses are forwarded
-    to the wrapped :class:`BksKeyEntry` object.
+    Entry type storing a PBEWithSHAAnd3-KeyTripleDES-CBC-encrypted :class:`BksKey`. The contained key type is unknown until decrypted.
     """
-    def __init__(self, **kwargs):
-        super(BksSealedKeyEntry, self).__init__(**kwargs)
-        self._nested = None # nested BksKeyEntry once decrypted
-
-    def __getattr__(self, name):
-        if not self.is_decrypted():
-            raise NotYetDecryptedException("Cannot access attribute '%s'; entry not yet decrypted, call decrypt() with the correct password first" % name)
-        # if it's an attribute that exists here, return it; otherwise forward the request to the nested entry
-        if "_"+name in self.__dict__:
-            return self.__dict__["_"+name]
+    def __init__(self, alias, timestamp, store_type, cert_chain, bkskey):
+        super(BksSealedKeyEntry, self).__init__(alias, timestamp, store_type, cert_chain)
+        if isinstance(bkskey, BksKey):
+            self._plaintext_form = bkskey
+        elif isinstance(bkskey, (bytes, bytearray)):
+            self._encrypted_form = bkskey
         else:
-            return getattr(self._nested, name)
+            raise Exception("derp")
 
     def is_decrypted(self):
-        return (not self._encrypted)
+        return (not self._encrypted_form)
 
     def decrypt(self, key_password):
         if self.is_decrypted():
             return
 
         pos = 0
-        data = self._encrypted
+        data = self._encrypted_form
 
         salt, pos = BksKeyStore._read_data(data, pos)
         iteration_count = b4.unpack_from(data, pos)[0]; pos += 4
@@ -190,15 +209,15 @@ class BksSealedKeyEntry(AbstractBksEntry):
         except BadPaddingException:
             raise DecryptionFailureException("Failed to decrypt data for key '%s'; wrong password?" % self.alias)
 
-        # the plaintext content of a SealedEntry is a KeyEntry
-        key_entry, dummy = BksKeyStore._read_bks_key(decrypted, 0, self.store_type)
-        key_entry.store_type = self.store_type
-        key_entry.cert_chain = self.cert_chain
-        key_entry.alias = self.alias
-        key_entry.timestamp = self.timestamp
+        # the plaintext content of a SealedKeyEntry is a BksKey
+        bkskey, dummy = BksKeyStore._read_bks_key(decrypted, 0)
 
-        self._nested = key_entry
-        self._encrypted = None
+        # if the BksKey we decrypted contains a PrivateKey, we should populate its .certs field with the chain we have at the entry level
+        if bkskey.type == BksKey.KEY_TYPE_PRIVATE:
+            bkskey.key.certs = self.cert_chain[:] # shallow copy
+
+        self._plaintext_form = bkskey
+        self._encrypted_form = None
 
     decrypt.__doc__ = AbstractBksEntry.decrypt.__doc__
     is_decrypted.__doc__ = AbstractBksEntry.is_decrypted.__doc__
@@ -208,10 +227,10 @@ class BksKeyStore(AbstractKeystore):
     """
     Bouncycastle "BKS" keystore parser. Supports both the current V2 and old V1 formats.
     """
-    ENTRY_TYPE_CERTIFICATE = 1
-    ENTRY_TYPE_KEY = 2            # plaintext key entry as would otherwise be stored inside a sealed entry (type 4); no longer supported at the time of writing (BC 1.54)
-    ENTRY_TYPE_SECRET = 3         # for keys that were added to the store in already-protected form; can be arbitrary data
-    ENTRY_TYPE_SEALED = 4         # for keys that were protected by the BC keystore implementation upon adding
+    ENTRY_TYPE_CERTIFICATE = 1    # maps to BksTrustedCertEntry
+    ENTRY_TYPE_KEY = 2            # maps to BksKeyEntry;           plaintext key entry as would otherwise be stored inside a sealed entry (type 4); no longer supported at the time of writing (BC 1.54)
+    ENTRY_TYPE_SECRET = 3         # maps to BksSecreyKeyEntry      for keys that were added to the store in already-protected form; can be arbitrary data
+    ENTRY_TYPE_SEALED = 4         # maps to BksSealedKeyEntry      for keys that were protected by the BC keystore implementation upon adding
 
     def __init__(self, store_type, entries, version=2):
         super(BksKeyStore, self).__init__(store_type, entries)
@@ -219,28 +238,28 @@ class BksKeyStore(AbstractKeystore):
         """Version of the keystore format, if loaded."""
 
     @property
-    def certs(self):
+    def cert_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
         those entries of type :class:`BksTrustedCertEntry`."""
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, BksTrustedCertEntry)])
 
     @property
-    def secret_keys(self):
+    def secret_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
         those entries of type :class:`BksSecretKeyEntry`."""
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, BksSecretKeyEntry)])
 
     @property
-    def sealed_keys(self):
+    def sealed_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
         those entries of type :class:`BksSealedKeyEntry`."""
         return dict([(a, e) for a, e in self.entries.items()
                      if isinstance(e, BksSealedKeyEntry)])
 
     @property
-    def plain_keys(self):
+    def plain_key_entries(self):
         """A subset of the :attr:`entries` dictionary, filtered down to only
         those entries of type :class:`BksKeyEntry`."""
         return dict([(a, e) for a, e in self.entries.items()
@@ -308,29 +327,17 @@ class BksKeyStore(AbstractKeystore):
             if _type == 0:
                 break
 
-            alias, pos = cls._read_utf(data, pos, kind="entry alias")
-            timestamp = int(b8.unpack_from(data, pos)[0]); pos += 8
-            chain_length = b4.unpack_from(data, pos)[0]; pos += 4
-
-            cert_chain = []
-            for n in range(chain_length):
-                entry, pos = cls._read_bks_cert(data, pos, store_type)
-                cert_chain.append(entry)
-
+            entry = None
             if _type == cls.ENTRY_TYPE_CERTIFICATE: # certificate
-                entry, pos = cls._read_bks_cert(data, pos, store_type)
+                entry, pos = cls._read_bks_cert_entry(data, pos, store_type)
             elif _type == cls.ENTRY_TYPE_KEY:       # key: plaintext key entry, i.e. same as sealed key but without the PBEWithSHAAnd3KeyTripleDESCBC layer
-                entry, pos = cls._read_bks_key(data, pos, store_type)
+                entry, pos = cls._read_bks_key_entry(data, pos, store_type)
             elif _type == cls.ENTRY_TYPE_SECRET:    # secret key: opaque arbitrary data blob, stored as-is by the keystore; can be anything (assumed to already be protected when supplied).
-                entry, pos = cls._read_bks_secret(data, pos, store_type)
+                entry, pos = cls._read_bks_secret_key_entry(data, pos, store_type)
             elif _type == cls.ENTRY_TYPE_SEALED:    # sealed key; a well-formatted certificate, private key or public key, encrypted by the BKS implementation with a standard algorithm at save time
-                entry, pos = cls._read_bks_sealed(data, pos, store_type)
+                entry, pos = cls._read_bks_sealed_entry(data, pos, store_type)
             else:
                 raise BadKeystoreFormatException("Unexpected keystore entry type %d", tag)
-
-            entry.alias = alias
-            entry.timestamp = timestamp
-            entry.cert_chain = cert_chain
 
             if try_decrypt_keys:
                 try:
@@ -338,40 +345,60 @@ class BksKeyStore(AbstractKeystore):
                 except DecryptionFailureException:
                     pass # ok, let user call .decrypt() manually afterwards
 
-            if alias in entries:
-                raise DuplicateAliasException("Found duplicate alias '%s'" % alias)
-            entries[alias] = entry
+            if entry.alias in entries:
+                raise DuplicateAliasException("Found duplicate alias '%s'" % entry.alias)
+            entries[entry.alias] = entry
 
         return (entries, pos)
 
     @classmethod
-    def _read_bks_cert(cls, data, pos, store_type):
-        cert_type, pos = cls._read_utf(data, pos, kind="certificate type")
-        cert_data, pos = cls._read_data(data, pos)
-        entry = BksTrustedCertEntry(type=cert_type, cert=cert_data, store_type=store_type)
+    def _read_alias_timestamp_chain(cls, data, pos):
+        alias, timestamp, pos = cls._read_alias_and_timestamp(data, pos)
+        chain_length = b4.unpack_from(data, pos)[0]; pos += 4
+
+        cert_chain = []
+        for n in range(chain_length):
+            entry, pos = cls._read_trusted_cert(data, pos)
+            cert_chain.append(entry)
+
+        return (alias, timestamp, cert_chain, pos)
+
+    @classmethod
+    def _read_bks_cert_entry(cls, data, pos, store_type):
+        alias, timestamp, cert_chain, pos = cls._read_alias_timestamp_chain(data, pos)
+        tcert, pos = cls._read_trusted_cert(data, pos)
+        entry = BksTrustedCertEntry(alias, timestamp, store_type, cert_chain, tcert)
         return entry, pos
 
     @classmethod
-    def _read_bks_key(cls, data, pos, store_type):
-        """Given a data stream, attempt to parse a stored BKS key entry at the given position, and return it as a BksKeyEntry."""
-        key_type = b1.unpack_from(data, pos)[0]; pos += 1
-        key_format, pos = BksKeyStore._read_utf(data, pos, kind="key format")
-        key_algorithm, pos = BksKeyStore._read_utf(data, pos, kind="key algorithm")
-        key_enc, pos = BksKeyStore._read_data(data, pos)
-
-        entry = BksKeyEntry(key_type, key_format, key_algorithm, key_enc, store_type=store_type)
+    def _read_bks_key_entry(cls, data, pos, store_type):
+        alias, timestamp, cert_chain, pos = cls._read_alias_timestamp_chain(data, pos)
+        bkskey, pos = cls._read_bks_key(data, pos)
+        entry = BksKeyEntry(alias, timestamp, store_type, cert_chain, bkskey)
         return entry, pos
 
     @classmethod
-    def _read_bks_secret(cls, data, pos, store_type):
+    def _read_bks_key(cls, data, pos):
+        type           = b1.unpack_from(data, pos)[0]; pos += 1
+        format, pos    = cls._read_utf(data, pos, kind="key format")
+        algorithm, pos = cls._read_utf(data, pos, kind="key algorithm")
+        encoded, pos   = cls._read_data(data, pos)
+
+        bkskey = BksKey(type, format, algorithm, encoded)
+        return bkskey, pos
+
+    @classmethod
+    def _read_bks_secret_key_entry(cls, data, pos, store_type):
+        alias, timestamp, cert_chain, pos = cls._read_alias_timestamp_chain(data, pos)
         secret_data, pos = cls._read_data(data, pos)
-        entry = BksSecretKeyEntry(store_type=store_type, encrypted=secret_data)
+        entry = BksSecretKeyEntry(alias, timestamp, store_type, cert_chain, secret_data)
         return entry, pos
 
     @classmethod
-    def _read_bks_sealed(cls, data, pos, store_type):
+    def _read_bks_sealed_entry(cls, data, pos, store_type):
+        alias, timestamp, cert_chain, pos = cls._read_alias_timestamp_chain(data, pos)
         sealed_data, pos = cls._read_data(data, pos)
-        entry = BksSealedKeyEntry(store_type=store_type, encrypted=sealed_data)
+        entry = BksSealedKeyEntry(alias, timestamp, store_type, cert_chain, sealed_data)
         return entry, pos
 
 class UberKeyStore(BksKeyStore):
