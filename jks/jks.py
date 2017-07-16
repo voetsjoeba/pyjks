@@ -36,15 +36,13 @@ from pyasn1_modules.rfc2459 import AlgorithmIdentifier
 from pyasn1.type import univ, namedtype
 from . import rfc2898
 from . import sun_crypto
+from .base import *
 from .util import *
 
 try:
     from StringIO import StringIO as BytesIO  # python 2
 except ImportError:
     from io import BytesIO  # python3
-
-__version_info__ = (17, 1, 1, 'dev')
-__version__ = ".".join(str(x) for x in __version_info__ if str(x))
 
 MAGIC_NUMBER_JKS = b4.pack(0xFEEDFEED)
 MAGIC_NUMBER_JCEKS = b4.pack(0xCECECECE)
