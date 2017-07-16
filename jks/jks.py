@@ -144,11 +144,19 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
 class SecretKeyEntry(AbstractKeystoreEntry):
     """Represents a secret (symmetric) key entry in a JCEKS keystore (e.g. an AES or DES key)."""
 
+    _classdesc_ByteArray = None
+    _classdesc_KR = None
+    _classdesc_KRT = None
+    _classdesc_SOFKP = None
+    _classdesc_SKS = None
+
     def __init__(self, alias, timestamp, store_type, skey):
         super(SecretKeyEntry, self).__init__(alias, timestamp, store_type)
         if isinstance(skey, SecretKey):
             self._plaintext_form = skey
         elif isinstance(skey, javaobj.JavaObject):
+            if not java_is_subclass(skey, "javax.crypto.SealedObject"):
+                raise UnexpectedJavaTypeException("Unexpected sealed object type '%s'; not a subclass of javax.crypto.SealedObject" % skey.get_class().name)
             self._encrypted_form = skey
         else:
             raise Exception("Invalid secret key value; must be a SecretKey instance or an Java SealedObject instance")
@@ -196,12 +204,14 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         # object for a completely different one at serialization time.
         # Again for SunJCE, the substitute object that gets serialized
         # is usually a java.security.KeyRep object.
+        key = None
+        algorithm = None
+
         obj, dummy = KeyStore._read_java_obj(plaintext, 0)
         clazz = obj.get_class()
         if clazz.name == "javax.crypto.spec.SecretKeySpec":
             algorithm = obj.algorithm
             key = java_bytestring(obj.key)
-            key_size = len(key)*8
 
         elif clazz.name == "java.security.KeyRep":
             assert (obj.type.constant == "SECRET"), "Expected value 'SECRET' for KeyRep.type enum value, found '%s'" % obj.type.constant
@@ -218,7 +228,6 @@ class SecretKeyEntry(AbstractKeystoreEntry):
 
             algorithm = obj.algorithm
             key = key_bytes
-            key_size = len(key)*8
         else:
             raise UnexpectedJavaTypeException("Unexpected object of type '%s' found inside SealedObject; don't know how to handle it" % clazz.name)
 
@@ -229,7 +238,135 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         """
         Encrypts the Secret Key so that the keystore can be saved
         """
-        raise NotImplementedError("Encrypting of Secret Keys not implemented")
+        if not self.is_decrypted():
+            return
+
+        sk = self._plaintext_form
+
+        # build a plaintext Java object to hold the key and some metadata
+        plaintext_obj = None
+        if "DES" in sk.algorithm:
+            plaintext_obj = self._java_KeyRep(sk.algorithm, sk.key, "RAW", "SECRET")
+        else:
+            plaintext_obj = self._java_SecretKeySpec(sk.algorithm, sk.key)
+
+        plaintext = javaobj.dumps(plaintext_obj)
+
+        # now encrypt the serialized plaintext object, and store the result in a SealedObjectForKeyProtector object
+        ciphertext, salt, iteration_count = sun_crypto.jce_pbe_encrypt(plaintext, key_password)
+
+        params = rfc2898.PBEParameter()
+        params.setComponentByName('salt', salt)
+        params.setComponentByName('iterationCount', iteration_count)
+        params = encoder.encode(params)
+
+        sealed_obj = self._java_SealedObjectForKeyProtector(ciphertext, params, "PBEWithMD5AndTripleDES", "PBEWithMD5AndTripleDES")
+        self._encrypted_form = sealed_obj
+        self._plaintext_form = None
+
+    @classmethod
+    def _java_ByteArray(cls, data):
+        """
+        Constructs and returns a javaobj.JavaArray representation of the given bytes/bytearray instance.
+        """
+        data = [ctypes.c_byte(b).value for b in bytearray(data)] # convert a Python bytes/bytearray instance to an array of signed integers
+
+        if not cls._classdesc_ByteArray:
+            cls._classdesc_ByteArray = javaobj.JavaClass()
+            cls._classdesc_ByteArray.name = "[B"
+            cls._classdesc_ByteArray.serialVersionUID = -5984413125824719648
+            cls._classdesc_ByteArray.flags = javaobj.JavaObjectConstants.SC_SERIALIZABLE
+
+        array_obj = javaobj.JavaArray()
+        array_obj.classdesc = cls._classdesc_ByteArray
+        array_obj.extend(data)
+
+        return array_obj
+
+    @classmethod
+    def _java_SealedObjectForKeyProtector(cls, encryptedContent, encodedParams, paramsAlg, sealAlg):
+        """
+        Constructs and returns a javaobj.JavaObject representation of a SealedObjectForKeyProtector object with the given parameters
+
+        :param bytes encryptedContent: The serialized underlying object, in encrypted format.
+        :param bytes encodedParams: The cryptographic parameters used by the sealing Cipher, encoded in the default format
+        :param str paramsAlg: Name of the encryption method (as known to Java) for which the parameters are valid.
+        :param str sealAlg: Name of the encryption method (as known to Java) that was used to encrypt the serialized underlying object.
+        """
+        if not cls._classdesc_SOFKP:
+            classdesc_SO = javaobj.JavaClass()
+            classdesc_SO.name = "javax.crypto.SealedObject"
+            classdesc_SO.serialVersionUID = 4482838265551344752
+            classdesc_SO.flags = javaobj.JavaObjectConstants.SC_SERIALIZABLE
+            classdesc_SO.fields_names = ['encodedParams', 'encryptedContent', 'paramsAlg', 'sealAlg']
+            classdesc_SO.fields_types = ['[B', '[B', 'Ljava/lang/String;', 'Ljava/lang/String;']
+
+            cls._classdesc_SOFKP = javaobj.JavaClass()
+            cls._classdesc_SOFKP.name = "com.sun.crypto.provider.SealedObjectForKeyProtector"
+            cls._classdesc_SOFKP.serialVersionUID = -3650226485480866989
+            cls._classdesc_SOFKP.flags = javaobj.JavaObjectConstants.SC_SERIALIZABLE
+            cls._classdesc_SOFKP.superclass = classdesc_SO
+
+        obj = javaobj.JavaObject()
+        obj.classdesc = cls._classdesc_SOFKP
+        obj.encryptedContent = cls._java_ByteArray(encryptedContent)
+        obj.encodedParams = cls._java_ByteArray(encodedParams)
+        obj.paramsAlg = javaobj.JavaString(paramsAlg)
+        obj.sealAlg = javaobj.JavaString(sealAlg)
+
+        return obj
+
+    @classmethod
+    def _java_SecretKeySpec(cls, algorithm, key):
+        if not cls._classdesc_SKS:
+            cls._classdesc_SKS = javaobj.JavaClass()
+            cls._classdesc_SKS.name = "javax.crypto.spec.SecretKeySpec"
+            cls._classdesc_SKS.serialVersionUID = 6577238317307289933
+            cls._classdesc_SKS.flags = javaobj.JavaObjectConstants.SC_SERIALIZABLE
+            cls._classdesc_SKS.fields_names = ['algorithm', 'key']
+            cls._classdesc_SKS.fields_types = ['Ljava/lang/String;', '[B']
+
+        obj = javaobj.JavaObject()
+        obj.classdesc = cls._classdesc_SKS
+        obj.algorithm = javaobj.JavaString(algorithm)
+        obj.key = cls._java_ByteArray(key)
+
+        return obj
+
+    @classmethod
+    def _java_KeyRep(cls, algorithm, encoded, xformat, xtype):
+        if not cls._classdesc_KRT:
+            classdesc_Enum = javaobj.JavaClass()
+            classdesc_Enum.name = "java.lang.Enum"
+            classdesc_Enum.serialVersionUID = 0
+            classdesc_Enum.flags = javaobj.JavaObjectConstants.SC_ENUM | javaobj.JavaObjectConstants.SC_SERIALIZABLE
+
+            cls._classdesc_KRT = javaobj.JavaClass()
+            cls._classdesc_KRT.name = "java.security.KeyRep$Type"
+            cls._classdesc_KRT.serialVersionUID = 0
+            cls._classdesc_KRT.flags = javaobj.JavaObjectConstants.SC_ENUM | javaobj.JavaObjectConstants.SC_SERIALIZABLE
+            cls._classdesc_KRT.superclass = classdesc_Enum
+
+        if not cls._classdesc_KR:
+            cls._classdesc_KR = javaobj.JavaClass()
+            cls._classdesc_KR.name = "java.security.KeyRep"
+            cls._classdesc_KR.serialVersionUID = -4757683898830641853
+            cls._classdesc_KR.flags = javaobj.JavaObjectConstants.SC_SERIALIZABLE
+            cls._classdesc_KR.fields_names = ['algorithm', 'encoded', 'format', 'type']
+            cls._classdesc_KR.fields_types = ['Ljava/lang/String;', '[B', 'Ljava/lang/String;', 'Ljava/security/KeyRep$Type;']
+
+        type_obj = javaobj.JavaEnum()
+        type_obj.classdesc = cls._classdesc_KRT
+        type_obj.constant = javaobj.JavaString(xtype)
+
+        obj = javaobj.JavaObject()
+        obj.classdesc = cls._classdesc_KR
+        obj.algorithm = javaobj.JavaString(algorithm)
+        obj.encoded = cls._java_ByteArray(encoded)
+        obj.format = javaobj.JavaString(xformat)
+        obj.type = type_obj
+
+        return obj
 
 # --------------------------------------------------------------------------
 
@@ -429,7 +566,7 @@ class KeyStore(AbstractKeystore):
         if self.store_type == 'jks':
             keystore = MAGIC_NUMBER_JKS
         elif self.store_type == 'jceks':
-            raise NotImplementedError("Saving of JCEKS keystores is not implemented")
+            keystore = MAGIC_NUMBER_JCEKS
         else:
             raise UnsupportedKeystoreTypeException("Only JKS and JCEKS keystores are supported")
 
@@ -447,7 +584,7 @@ class KeyStore(AbstractKeystore):
             elif isinstance(entry, SecretKeyEntry):
                 if self.store_type != 'jceks':
                     raise UnsupportedKeystoreEntryTypeException('Secret Key only allowed in JCEKS keystores')
-                raise NotImplementedError("Saving of Secret Keys not implemented")
+                keystore += self._write_secret_key_entry(entry)
             else:
                 raise UnsupportedKeystoreEntryTypeException("Unknown entry type in keystore")
 
@@ -542,10 +679,7 @@ class KeyStore(AbstractKeystore):
         #   private String paramsAlg;                # The algorithm of the parameters used.
         #   protected byte[] encodedParams;          # The cryptographic parameters used by the sealing Cipher, encoded in the default format.
         alias, timestamp, pos = cls._read_alias_and_timestamp(data, pos)
-
         sealed_obj, pos = cls._read_java_obj(data, pos, ignore_remaining_data=True)
-        if not java_is_subclass(sealed_obj, "javax.crypto.SealedObject"):
-            raise UnexpectedJavaTypeException("Unexpected sealed object type '%s'; not a subclass of javax.crypto.SealedObject" % sealed_obj.get_class().name)
 
         entry = SecretKeyEntry(alias, timestamp, store_type, sealed_obj)
         return entry, pos
@@ -575,5 +709,12 @@ class KeyStore(AbstractKeystore):
         result = b4.pack(cls.ENTRY_TYPE_CERTIFICATE)
         result += cls._write_alias_and_timestamp(entry.alias, entry.timestamp)
         result += cls._write_trusted_cert(entry.item)
+        return result
+
+    @classmethod
+    def _write_secret_key_entry(cls, entry):
+        result = b4.pack(cls.ENTRY_TYPE_SECRET_KEY)
+        result += cls._write_alias_and_timestamp(entry.alias, entry.timestamp)
+        result += javaobj.dumps(entry._encrypted_form)
         return result
 
