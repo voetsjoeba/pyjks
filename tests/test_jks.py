@@ -362,13 +362,32 @@ class JksAndJceksLoadTests(AbstractTest):
         self._test_duplicate_aliases("jks")
         self._test_duplicate_aliases("jceks")
 
-    def test_non_ascii_jks_password(self):
-        store = jks.KeyStore.load(KS_PATH + "/jks/non_ascii_password.jks", u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029")
+    def _test_unicode_passwords(self, store_type):
+        fancy_store_password = u"\u0000\u0041\u00b3\u05e4\u080a\ud7fb\ue000\uffee\U000100a6"
+        fancy_entry_password = u"\U000100a6\uffee\ue000\ud7fb\u080a\u05e4\u00b3\u0041\u0000"
+        #int[] codePoints = new int[]{
+        #    0x00000000, // NUL
+        #    0x00000041, // A                                   range 0x0000 - 0x007F
+        #    0x000000B3, // superscript three                   range 0x0080 - 0x07FF
+        #    0x000005E4, // hebrew letter PE                    range 0x0080 - 0x07FF
+        #    0x0000080A, // samaritan letter kaaf               range 0x0800 - 0xD800
+        #    0x0000D7FB, // hangul jongseong phieuph-thieuth    range 0x0800 - 0xD800
+        #    0x0000E000, // private use area                    range 0xE000 - 0xFFFF
+        #    0x0000FFEE, // halfwidth white circle              range 0xE000 - 0xFFFF
+        #    0x000100A6, // linear b ideogram b158              range 0x10000 - 0x10FFFF
+        #};
+        store = jks.KeyStore.load(KS_PATH + "/{0}/unicode_passwords.{0}".format(store_type), fancy_store_password, try_decrypt_keys=False)
+        self.assertEqual(store.store_type, store_type)
+
         pke = self.find_private_key_entry(store, "mykey")
-        self.assertEqual(store.store_type, "jks")
-        self.check_pkey_and_certs_equal(pke.item, jks.util.RSA_ENCRYPTION_OID, expected.jks_non_ascii_password.private_key_pkcs8, expected.jks_non_ascii_password.certs)
-        # TODO: test characters outside the BMP (see if Java uses modified or standard UTF-8 for the encoding of the alias
-        #       (JavaKeyStore$JKS defers to DataInput/OutputStream for reading/writing UTF8, which suggests modified UTF-8)
+        self.assertTrue(not pke.is_decrypted())
+        pke.decrypt(fancy_entry_password if store_type == "jks" else "12345678") # JCEKS keystores require ASCII-only entry passwords
+        self.assertTrue(pke.is_decrypted())
+        self.check_pkey_and_certs_equal(pke.item, jks.util.RSA_ENCRYPTION_OID, expected.unicode_passwords.private_key_pkcs8, expected.unicode_passwords.certs)
+
+    def test_unicode_passwords(self):
+        self._test_unicode_passwords("jks")
+        self._test_unicode_passwords("jceks")
 
     def test_jceks_bad_private_key_decrypt(self):
         # In JCEKS stores, the key protection scheme is password-based encryption with PKCS#5/7 padding, so any wrong password has a 1/256
@@ -516,8 +535,8 @@ class JksAndJceksSaveTests(AbstractTest):
         self._test_jks_nodecrypt_roundtrip_identical("/jks/RSA2048_3certs.jks", "12345678")
     def test_load_and_save_dsa_keystore(self):
         self._test_jks_nodecrypt_roundtrip_identical("/jks/DSA2048.jks", "12345678")
-    def test_load_and_save_keystore_non_ascii_password(self):
-        self._test_jks_nodecrypt_roundtrip_identical("/jks/non_ascii_password.jks", u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029")
+    def test_load_and_save_keystore_unicode_passwords(self):
+        self._test_jks_nodecrypt_roundtrip_identical("/jks/unicode_passwords.jks", u"\u0000\u0041\u00b3\u05e4\u080a\ud7fb\ue000\uffee\U000100a6")
     def test_load_and_save_keystore_custom_entry_passwords(self):
         self._test_jks_nodecrypt_roundtrip_identical("/jks/custom_entry_passwords.jks", "store_password")
     def test_load_and_save_keystore_3certs(self):
@@ -525,12 +544,12 @@ class JksAndJceksSaveTests(AbstractTest):
 
     # -------------------------------------------------------------------------------------------------------
 
-    def test_create_and_load_keystore_non_ascii_password(self):
-        pk = jks.PrivateKey(expected.jks_non_ascii_password.private_key_pkcs8, [jks.base.TrustedCertificate("X.509", data) for data in expected.jks_non_ascii_password.certs])
+    def test_create_and_load_keystore_unicode_passwords(self):
+        pk = jks.PrivateKey(expected.unicode_passwords.private_key_pkcs8, [jks.base.TrustedCertificate("X.509", data) for data in expected.unicode_passwords.certs])
         items = {"mykey": pk}
-        fancy_password = u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029"
+        fancy_password = u"\u0000\u0041\u00b3\u05e4\u080a\ud7fb\ue000\uffee\U000100a6"
 
-        # Note: JCEKS stores require that the passwords for keys are ASCII-only (the store password can still be non-ASCII).
+        # Note: JCEKS stores require that entry passwords are ASCII-only (the store password can still be non-ASCII).
         # JKS stores have no such restriction.
         self._test_create_and_load_keystore("jks",   fancy_password, items)
         self.assertRaises(IllegalPasswordCharactersException, self._test_create_and_load_keystore, "jceks", fancy_password, items) # private key will get auto-encrypted with the store password

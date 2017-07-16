@@ -22,6 +22,7 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.DSAPrivateKey;
 import java.security.interfaces.RSAPrivateKey;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -126,6 +127,17 @@ public class PyJksTestCase
 		sb.append("]\n");
 
 		FileUtils.writeStringToFile(new File(filename), sb.toString());
+	}
+
+	public static String codePointsToString(int[] codePoints)
+	{
+		char[] charBuffer = new char[codePoints.length*2];
+		int i = 0;
+		for (int n=0; n < codePoints.length; n++){
+			i += Character.toChars(codePoints[n], charBuffer, i);
+		}
+		char[] finalChars = Arrays.copyOfRange(charBuffer, 0, i);
+		return new String(finalChars);
 	}
 
 	protected KeyPair generateKeyPair(String algorithm, int size) throws Exception
