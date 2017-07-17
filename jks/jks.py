@@ -52,7 +52,8 @@ class TrustedCertEntry(AbstractKeystoreEntry):
 
     def __init__(self, alias, timestamp, store_type, tcert):
         super(TrustedCertEntry, self).__init__(alias, timestamp, store_type)
-        # TODO: check that tcert is a TrustedCertificate
+        if not isinstance(tcert, TrustedCertificate):
+            raise ValueError("tcert argument must be a TrustedCertificate instance")
         self._plaintext_form = tcert
 
     def decrypt(self, key_password):
@@ -74,7 +75,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
             self.certs = (certs or []) # certs are not involved in encryption/decryption, keep these separately
             self._encrypted_form = pkey
         else:
-            raise Exception("Invalid private key value; must be a PrivateKey instance or an encrypted bytes form")
+            raise ValueError("Invalid private key value; must be a PrivateKey instance or an encrypted bytes form")
 
     def decrypt(self, key_password):
         if self.is_decrypted():
@@ -176,7 +177,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
                 raise UnexpectedJavaTypeException("Unexpected sealed object type '%s'; not a subclass of javax.crypto.SealedObject" % skey.get_class().name)
             self._encrypted_form = skey
         else:
-            raise Exception("Invalid secret key value; must be a SecretKey instance or a JavaObject of class javax.crypto.SealedObject")
+            raise ValueError("Invalid secret key value; must be a SecretKey instance or a JavaObject of class javax.crypto.SealedObject")
 
     def decrypt(self, key_password):
         if self.is_decrypted():
@@ -404,7 +405,7 @@ class KeyStore(AbstractKeystore):
         elif isinstance(item, TrustedCertificate):
             entry = TrustedCertEntry(alias, timestamp, self.store_type, item)
         else:
-            raise Exception("Don't know how to make an Entry for storing objects of type '%s' into a keystore ..." % type(item))
+            raise ValueError("Don't know how to make an Entry for storing objects of type '%s' into a keystore ..." % type(item))
 
         return entry
 

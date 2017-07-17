@@ -1095,8 +1095,8 @@ class MiscTests(AbstractTest):
             jks.SecretKeyEntry("1", 0, "jceks", jks.SecretKey(b"", "AES")),
             jks.SecretKeyEntry("2", 0, "jceks", jks.SecretKey(b"", "AES")),
             jks.SecretKeyEntry("3", 0, "jceks", jks.SecretKey(b"", "AES")),
-            jks.TrustedCertEntry("4", 0, "jceks", None),
-            jks.TrustedCertEntry("5", 0, "jceks", None),
+            jks.TrustedCertEntry("4", 0, "jceks", jks.TrustedCertificate("X.509", b"")),
+            jks.TrustedCertEntry("5", 0, "jceks", jks.TrustedCertificate("X.509", b"")),
             jks.PrivateKeyEntry("6", 0, "jceks", b"")
         ]
         ks = jks.KeyStore("jceks", dummy_entries)
