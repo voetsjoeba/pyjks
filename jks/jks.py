@@ -65,6 +65,8 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
 
     def __init__(self, alias, timestamp, store_type, pkey, certs=None):
         super(PrivateKeyEntry, self).__init__(alias, timestamp, store_type)
+        if store_type not in ["jks", "jceks"]:
+            raise UnsupportedKeystoreTypeException("Cannot create entries of this type for storage in '%s' keystores; only valid in JKS and JCEKS stores" % (self.store_type,))
         if isinstance(pkey, PrivateKey):
             self.certs = None
             self._plaintext_form = pkey
@@ -165,7 +167,8 @@ class SecretKeyEntry(AbstractKeystoreEntry):
 
     def __init__(self, alias, timestamp, store_type, skey):
         super(SecretKeyEntry, self).__init__(alias, timestamp, store_type)
-        # TODO: check that store_type is jceks
+        if store_type != "jceks":
+            raise UnsupportedKeystoreTypeException("Cannot create entries of this type for storage in '%s' keystores; only valid in JCEKS stores" % (self.store_type,))
         if isinstance(skey, SecretKey):
             self._plaintext_form = skey
         elif isinstance(skey, javaobj.JavaObject):

@@ -86,6 +86,8 @@ class AbstractBksEntry(AbstractKeystoreEntry):
     def __init__(self, alias, timestamp, store_type, cert_chain):
         super(AbstractBksEntry, self).__init__(alias, timestamp, store_type)
         self.cert_chain = cert_chain
+        if store_type not in ["bks", "uber"]:
+            raise UnsupportedKeystoreTypeException("Cannot create entries of this type for storage in '%s' keystores; only valid in BKS and UBER stores" % (self.store_type,))
 
 class BksTrustedCertEntry(AbstractBksEntry):
     """
