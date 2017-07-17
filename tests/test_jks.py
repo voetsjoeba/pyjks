@@ -781,13 +781,36 @@ class MiscTests(AbstractTest):
             "5": jks.TrustedCertEntry("dummy5", 0, "jks", None),
             "6": jks.PrivateKeyEntry("dummy6", 0, "jks", b"")
         }
-        ks = jks.KeyStore("jks", dummy_entries)
+        ks = jks.KeyStore("jceks", dummy_entries)
         self.assertEqual(len(ks.private_key_entries), 1)
         self.assertEqual(len(ks.secret_key_entries), 3)
         self.assertEqual(len(ks.cert_entries), 2)
         self.assertTrue(all(a in ks.secret_key_entries for a in ["1", "2", "3"]))
         self.assertTrue(all(a in ks.private_key_entries for a in ["6"]))
         self.assertTrue(all(a in ks.cert_entries for a in ["4", "5"]))
+
+        ks = jks.bks.BksKeyStore("bks", {})
+        self.assertEqual(0, len(ks.cert_entries))
+        self.assertEqual(0, len(ks.secret_key_entries))
+        self.assertEqual(0, len(ks.sealed_key_entries))
+        self.assertEqual(0, len(ks.plain_key_entries))
+
+        pubkey = jks.PublicKey(expected.RSA1024.public_key)
+        privkey = jks.PrivateKey(expected.RSA1024.private_key, [])
+        seckey = jks.SecretKey(b"", "AES")
+        dummy_entries = {
+            "1": jks.bks.BksSealedKeyEntry("1", 0, "bks", [], jks.bks.BksKey.create_from(privkey)),
+            "2": jks.bks.BksSealedKeyEntry("2", 0, "bks", [], jks.bks.BksKey.create_from(pubkey)),
+            "3": jks.bks.BksSealedKeyEntry("3", 0, "bks", [], jks.bks.BksKey.create_from(seckey)),
+            "4": jks.bks.BksKeyEntry("4", 0, "bks", [], jks.bks.BksKey.create_from(pubkey)),
+            "5": jks.bks.BksSecretKeyEntry("5", 0, "bks", [], b""),
+            "6": jks.bks.BksTrustedCertEntry("6", 0, "bks", [], jks.TrustedCertificate("X.509", b""))
+        }
+        ks = jks.bks.BksKeyStore("bks", dummy_entries)
+        self.assertEqual(3, len(ks.sealed_key_entries))
+        self.assertEqual(1, len(ks.secret_key_entries))
+        self.assertEqual(1, len(ks.plain_key_entries))
+        self.assertEqual(1, len(ks.cert_entries))
 
     def test_try_decrypt_keys(self):
         # as applied to secret keys
