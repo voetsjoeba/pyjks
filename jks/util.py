@@ -100,6 +100,9 @@ def bitstring_to_bytes(bitstr):
     Converts a pyasn1 univ.BitString instance to byte sequence of type 'bytes'.
     The bit string is interpreted big-endian and is left-padded with 0 bits to form a multiple of 8.
     """
+    # Note: as of PyAsn1 0.2.1+, BitString objects have a .asOctets() method that you can call directly to do this,
+    # but that version is fairly recent at the time of writing (few months old). So to ease the lives of people stuck
+    # on older versions, we'll stick with this for now.
     bitlist = list(bitstr)
     bits_missing = (8 - len(bitlist) % 8) % 8
     bitlist = [0]*bits_missing + bitlist # pad with 0 bits to a multiple of 8
