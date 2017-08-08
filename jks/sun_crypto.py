@@ -48,6 +48,20 @@ def _jks_keystream(iv, password):
         for byte in cur:
             yield byte
 
+def jce_pbe_encrypt(data, password):
+    from Crypto.Random import random as CRandom
+    salt = os.urandom(8)
+    iteration_count = CRandom.randint(1500, 4000) # TODO: double check
+
+    key, iv = _jce_pbe_derive_key_and_iv(password, salt, iteration_count)
+    padded = add_pkcs7_padding(data, 8)
+
+    from Crypto.Cipher import DES3
+    des3 = DES3.new(key, DES3.MODE_CBC, IV=iv)
+    result = des3.encrypt(padded)
+
+    return result, salt, iteration_count
+
 def jce_pbe_decrypt(data, password, salt, iteration_count):
     """
     Decrypts Sun's custom PBEWithMD5AndTripleDES password-based encryption scheme.

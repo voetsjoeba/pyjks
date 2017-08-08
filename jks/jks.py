@@ -254,11 +254,20 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         ciphertext = None
         a = rfc2459.AlgorithmIdentifier()
 
-        if store_type in ["jks", "jceks"]:
-            # TODO: encrypt with the JCE algorithm for storage in JCEKS keystores
+        if store_type == "jks":
             ciphertext = sun_crypto.jks_pkey_encrypt(self.pkey_pkcs8, key_password)
             a.setComponentByName('algorithm', sun_crypto.SUN_JKS_ALGO_ID)
             a.setComponentByName('parameters', univ.Null())
+
+        elif store_type == "jceks":
+            ciphertext, salt, iteration_count = sun_crypto.jce_pbe_encrypt(self.pkey_pkcs8, key_password)
+
+            pbe_params = rfc2898.PBEParameter()
+            pbe_params.setComponentByName('salt', salt)
+            pbe_params.setComponentByName('iterationCount', iteration_count)
+
+            a.setComponentByName('algorithm', sun_crypto.SUN_JCE_ALGO_ID)
+            a.setComponentByName('parameters', encoder.encode(pbe_params))
         else:
             raise UnsupportedKeystoreTypeException("Cannot encrypt entries of this type for storage in '%s' keystores; can only encrypt for JKS and JCEKS stores" % (store_type,))
 
