@@ -32,7 +32,6 @@ import javaobj
 import time
 from pyasn1.codec.der import encoder
 from pyasn1_modules import rfc5208, rfc2459
-from pyasn1_modules.rfc2459 import AlgorithmIdentifier
 from pyasn1.type import univ, namedtype
 from . import rfc2898
 from . import sun_crypto
@@ -87,7 +86,7 @@ class TrustedCertEntry(AbstractKeystoreEntry):
         """Does nothing for this entry type; certificates are inherently public data and are not stored in encrypted form."""
         return
 
-    def encrypt(self, key_password):
+    def _encrypt_for(self, store_type, key_password):
         """Does nothing for this entry type; certificates are inherently public data and are not stored in encrypted form."""
         return
 
@@ -156,7 +155,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
             # We must encode it to pkcs8
             private_key_info = rfc5208.PrivateKeyInfo()
             private_key_info.setComponentByName('version','v1')
-            a = AlgorithmIdentifier()
+            a = rfc2459.AlgorithmIdentifier()
             a.setComponentByName('algorithm', pke._algorithm_oid)
             a.setComponentByName('parameters', univ.Null())
             private_key_info.setComponentByName('privateKeyAlgorithm', a)
@@ -240,7 +239,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         self._pkey_pkcs8 = plaintext
         self._algorithm_oid = algorithm_oid
 
-    def encrypt(self, key_password):
+    def _encrypt_for(self, store_type, key_password):
         """
         Encrypts the private key, so that it can be saved to a keystore.
 
@@ -250,21 +249,24 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         :param str key_password: The password to encrypt the entry with.
         """
         if not self.is_decrypted():
-            return
+            return self._encrypted
 
-        encrypted_private_key = sun_crypto.jks_pkey_encrypt(self.pkey_pkcs8, key_password)
+        ciphertext = None
+        a = rfc2459.AlgorithmIdentifier()
 
-        a = AlgorithmIdentifier()
-        a.setComponentByName('algorithm', sun_crypto.SUN_JKS_ALGO_ID)
-        a.setComponentByName('parameters', univ.Null())
+        if store_type in ["jks", "jceks"]:
+            # TODO: encrypt with the JCE algorithm for storage in JCEKS keystores
+            ciphertext = sun_crypto.jks_pkey_encrypt(self.pkey_pkcs8, key_password)
+            a.setComponentByName('algorithm', sun_crypto.SUN_JKS_ALGO_ID)
+            a.setComponentByName('parameters', univ.Null())
+        else:
+            raise UnsupportedKeystoreTypeException("Cannot encrypt entries of this type for storage in '%s' keystores; can only encrypt for JKS and JCEKS stores" % (store_type,))
+
         epki = rfc5208.EncryptedPrivateKeyInfo()
-        epki.setComponentByName('encryptionAlgorithm',a)
-        epki.setComponentByName('encryptedData', encrypted_private_key)
+        epki.setComponentByName('encryptionAlgorithm', a)
+        epki.setComponentByName('encryptedData', ciphertext)
 
-        self._encrypted = encoder.encode(epki)
-        self._pkey = None
-        self._pkey_pkcs8 = None
-        self._algorithm_oid = None
+        return encoder.encode(epki)
 
     is_decrypted.__doc__ = AbstractKeystoreEntry.is_decrypted.__doc__
 
@@ -380,7 +382,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
 
     is_decrypted.__doc__ = AbstractKeystoreEntry.is_decrypted.__doc__
 
-    def encrypt(self, key_password):
+    def _encrypt_for(self, store_type, key_password):
         """
         Encrypts the Secret Key so that the keystore can be saved
         """
@@ -567,7 +569,7 @@ class KeyStore(AbstractKeystore):
 
         return cls(store_type, entries)
 
-    def saves(self, store_password):
+    def saves(self, store_password, entry_passwords=None):
         """
         Saves the keystore so that it can be read by other applications.
 
@@ -584,6 +586,7 @@ class KeyStore(AbstractKeystore):
         :raises UnsupportedKeystoreEntryTypeException: If the keystore
           contains an unsupported entry type
         """
+        entry_passwords = (entry_passwords or {})
 
         if self.store_type == 'jks':
             keystore = MAGIC_NUMBER_JKS
@@ -596,10 +599,13 @@ class KeyStore(AbstractKeystore):
         keystore += b4.pack(len(self.entries))
 
         for alias, item in self.entries.items():
+            key_password = entry_passwords.get(alias, store_password)
+
             if isinstance(item, TrustedCertEntry):
                 keystore += self._write_trusted_cert(alias, item)
             elif isinstance(item, PrivateKeyEntry):
-                keystore += self._write_private_key(alias, item, store_password)
+                encrypted_form = item._encrypt_for(self.store_type, key_password)
+                keystore += self._write_private_key(alias, item, encrypted_form)
             elif isinstance(item, SecretKeyEntry):
                 if self.store_type != 'jceks':
                     raise UnsupportedKeystoreEntryTypeException('Secret Key only allowed in JCEKS keystores')
@@ -720,12 +726,11 @@ class KeyStore(AbstractKeystore):
         return obj, pos + obj_size
 
     @classmethod
-    def _write_private_key(cls, alias, item, key_password):
+    def _write_private_key(cls, alias, item, encrypted_form):
         private_key_entry = b4.pack(cls.ENTRY_TYPE_PRIVATE_KEY)
         private_key_entry += cls._write_utf(alias)
         private_key_entry += b8.pack(item.timestamp)
-        item.encrypt(key_password)
-        private_key_entry += cls._write_data(item._encrypted)
+        private_key_entry += cls._write_data(encrypted_form)
 
         private_key_entry += b4.pack(len(item.cert_chain))
         for cert in item.cert_chain:

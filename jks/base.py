@@ -22,13 +22,13 @@ class AbstractKeystore(object):
                             try_decrypt_keys=try_decrypt_keys)
         return ret
 
-    def save(self, filename, store_password):
+    def save(self, filename, store_password, entry_passwords=None):
         """
         Convenience wrapper function; calls the :func:`saves`
         and saves the content to a file.
         """
         with open(filename, 'wb') as file:
-            keystore_bytes = self.saves(store_password)
+            keystore_bytes = self.saves(store_password, entry_passwords=entry_passwords)
             file.write(keystore_bytes)
 
     @classmethod
@@ -103,9 +103,9 @@ class AbstractKeystoreEntry(object):
         """
         raise NotImplementedError("Abstract method")
 
-    def encrypt(self, key_password):
+    def _encrypt_for(self, store_type, key_password):
         """
-        Encrypts the entry using the given password, so that it can be saved.
+        Encrypts the entry to be saved to a store of the given type, using the given password.
 
         :param str key_password: The password to encrypt the entry with.
         """

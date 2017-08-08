@@ -335,9 +335,9 @@ class JksAndJceksSaveTests(AbstractTest):
         store = jks.KeyStore.new('jks', [cert])
         pk = self.find_private_key(store, "mykey")
         self.assertTrue(pk.is_decrypted())
-        pk.encrypt("private_password")
-        self.assertTrue(not pk.is_decrypted())
-        store_bytes = store.saves("store_password")
+        store_bytes = store.saves("store_password", entry_passwords={"mykey": "private_password"})
+        self.assertTrue(pk.is_decrypted()) # stays decrypted, even after re-encrypting for storage in another keystore
+
         store2 = jks.KeyStore.loads(store_bytes, 'store_password')
         pk2 = self.find_private_key(store2, "mykey")
         self.assertTrue(not pk2.is_decrypted())
