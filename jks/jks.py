@@ -283,7 +283,6 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
 class SecretKeyEntry(AbstractKeystoreEntry):
     """Represents a secret (symmetric) key entry in a JCEKS keystore (e.g. an AES or DES key)."""
 
-    _classdesc_ByteArray = None
     _classdesc_KR = None
     _classdesc_KRT = None
     _classdesc_SOFKP = None
@@ -334,8 +333,8 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         sealed_obj = self._encrypted
 
         # convert between javaobj's internal byte[] representation and a Python bytes() object
-        encodedParams = java_bytestring(sealed_obj.encodedParams)
-        encryptedContent = java_bytestring(sealed_obj.encryptedContent)
+        encodedParams    = java2bytes(sealed_obj.encodedParams)
+        encryptedContent = java2bytes(sealed_obj.encryptedContent)
 
         plaintext = None
         if sealed_obj.sealAlg == "PBEWithMD5AndTripleDES":
@@ -375,12 +374,12 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         clazz = obj.get_class()
         if clazz.name == "javax.crypto.spec.SecretKeySpec":
             algorithm = obj.algorithm
-            key = java_bytestring(obj.key)
+            key = java2bytes(obj.key)
             key_size = len(key)*8
 
         elif clazz.name == "java.security.KeyRep":
             assert (obj.type.constant == "SECRET"), "Expected value 'SECRET' for KeyRep.type enum value, found '%s'" % obj.type.constant
-            key_bytes = java_bytestring(obj.encoded)
+            key_bytes = java2bytes(obj.encoded)
             key_encoding = obj.format
             if key_encoding == "RAW":
                 pass # ok, no further processing needed
@@ -429,25 +428,6 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         return sealed_obj
 
     @classmethod
-    def _java_ByteArray(cls, data):
-        """
-        Constructs and returns a javaobj.JavaArray representation of the given bytes/bytearray instance.
-        """
-        data = [ctypes.c_byte(b).value for b in bytearray(data)] # convert a Python bytes/bytearray instance to an array of signed integers
-
-        if not cls._classdesc_ByteArray:
-            cls._classdesc_ByteArray = javaobj.JavaClass()
-            cls._classdesc_ByteArray.name = "[B"
-            cls._classdesc_ByteArray.serialVersionUID = -5984413125824719648
-            cls._classdesc_ByteArray.flags = javaobj.JavaObjectConstants.SC_SERIALIZABLE
-
-        array_obj = javaobj.JavaArray()
-        array_obj.classdesc = cls._classdesc_ByteArray
-        array_obj.extend(data)
-
-        return array_obj
-
-    @classmethod
     def _java_SealedObjectForKeyProtector(cls, encryptedContent, encodedParams, paramsAlg, sealAlg):
         """
         Constructs and returns a javaobj.JavaObject representation of a SealedObjectForKeyProtector object with the given parameters
@@ -473,8 +453,8 @@ class SecretKeyEntry(AbstractKeystoreEntry):
 
         obj = javaobj.JavaObject()
         obj.classdesc = cls._classdesc_SOFKP
-        obj.encryptedContent = cls._java_ByteArray(encryptedContent)
-        obj.encodedParams = cls._java_ByteArray(encodedParams)
+        obj.encryptedContent = bytes2java(encryptedContent)
+        obj.encodedParams = bytes2java(encodedParams)
         obj.paramsAlg = javaobj.JavaString(paramsAlg)
         obj.sealAlg = javaobj.JavaString(sealAlg)
 
@@ -493,7 +473,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         obj = javaobj.JavaObject()
         obj.classdesc = cls._classdesc_SKS
         obj.algorithm = javaobj.JavaString(algorithm)
-        obj.key = cls._java_ByteArray(key)
+        obj.key = bytes2java(key)
 
         return obj
 
@@ -526,7 +506,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         obj = javaobj.JavaObject()
         obj.classdesc = cls._classdesc_KR
         obj.algorithm = javaobj.JavaString(algorithm)
-        obj.encoded = cls._java_ByteArray(encoded)
+        obj.encoded = bytes2java(encoded)
         obj.format = javaobj.JavaString(xformat)
         obj.type = type_obj
 
