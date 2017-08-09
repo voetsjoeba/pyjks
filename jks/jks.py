@@ -75,7 +75,8 @@ class TrustedCertEntry(AbstractKeystoreEntry):
 
         tke = cls(timestamp = timestamp,
                                alias = alias,
-                               cert = cert)
+                               cert = cert,
+                               type = "X.509")
         return tke
 
     def is_decrypted(self):
