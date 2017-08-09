@@ -1,10 +1,12 @@
 # vim: set et ai ts=4 sts=4 sw=4:
 from __future__ import print_function
+import os
 import textwrap
 import base64
 import struct
 import ctypes
 import javaobj
+import tempfile
 
 from pyasn1.codec.ber import decoder
 from pyasn1.error import PyAsn1Error
@@ -104,6 +106,15 @@ def bitstring_to_bytes(bitstr):
         result.append(byte)
     return bytes(result)
 
+class cd(object):
+    def __init__(self, newpath):
+        self.newpath = os.path.expanduser(newpath)
+    def __enter__(self):
+        self.oldpath = os.getcwd()
+        os.chdir(self.newpath)
+    def __exit__(self, etype, value, traceback):
+        os.chdir(self.oldpath)
+
 def xor_bytearrays(a, b):
     return bytearray([x^y for x,y in zip(a,b)])
 
@@ -186,6 +197,20 @@ def add_pkcs7_padding(m, block_size):
     num_padding_bytes = block_size - (len(m) % block_size)
     m = m + bytearray([num_padding_bytes]*num_padding_bytes)
     return bytes(m)
+
+class tempfile_path(object):
+    """
+    Upon entering a with-context, creates and returns the path to an unopened temporary file on disk. Upon exiting, the temporary file is removed.
+    Alternative for tempfile.NamedTemporaryFile() to work around the following phrase in its documentation:
+        Whether the name can be used to open the file a second time, while the named temporary file is still open, varies across platforms
+        (it can be so used on Unix; it cannot on Windows NT or later).
+    """
+    def __init__(self):
+        self.fd, self.path = tempfile.mkstemp()
+    def __enter__(self):
+        return self.path
+    def __exit__(self, etype, value, traceback):
+        os.remove(self.path)
 
 def java_is_subclass(obj, class_name):
     """Given a deserialized JavaObject as returned by the javaobj library,

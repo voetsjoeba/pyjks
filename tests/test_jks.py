@@ -8,9 +8,11 @@ Note: run 'mvn test' in the tests/java directory to reproduce keystore files (re
 from __future__ import print_function
 import os
 import sys
-import unittest
 import hashlib
 import time
+import subprocess
+import json
+import base64
 from pyasn1.error import PyAsn1Error
 from pyasn1.codec.der import encoder
 from pyasn1_modules import rfc5208, rfc2459
@@ -19,13 +21,50 @@ import jks
 from jks.util import *
 from . import expected
 
-CUR_PATH = os.path.dirname(os.path.abspath(__file__))
-KS_PATH = os.path.join(CUR_PATH, 'keystores')
+if sys.version_info < (2, 7):
+    import unittest2 as unittest # Python 2.6's unittest doesn't have any functionality for skipping tests
+else:
+    import unittest
 
 try:
     long
 except:
     long = int
+
+CUR_PATH = os.path.dirname(os.path.abspath(__file__))
+KS_PATH = os.path.join(CUR_PATH, 'keystores')
+JAVA_TESTCASES_PATH = os.path.join(CUR_PATH, "java")
+
+java_dumper_jar_path = None # None initially; set to path to JAR file on module setup (if successfully built)
+java_dumper_main_class = "org.pyjks.KeystoreDumper"
+
+# subprocess.check_output does not exist in Python 2.6; use 2.7's implementation
+if "check_output" not in dir(subprocess):
+    def f(*popenargs, **kwargs):
+        if 'stdout' in kwargs:
+            raise ValueError('stdout argument not allowed, it will be overridden.')
+        process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
+        output, unused_err = process.communicate()
+        retcode = process.poll()
+        if retcode:
+            cmd = kwargs.get("args")
+            if cmd is None:
+                cmd = popenargs[0]
+            raise subprocess.CalledProcessError(retcode, cmd)
+        return output
+    subprocess.check_output = f
+
+def setUpModule():
+    global java_dumper_jar_path
+    with cd(JAVA_TESTCASES_PATH):
+        try:
+            # See if we can build the KeystoreDumper JAR.
+            # Note: we skip running the test cases, because those will produce new randomized keystore input files for the test cases.
+            # While harmless, the generated keystores are checked into source control, so running the test cases would just produce git status noise.
+            subprocess.check_output(["mvn", "package", "-DskipTests"])
+            java_dumper_jar_path = os.path.abspath("target/pyjks-1.0.0-jar-with-dependencies.jar")
+        except:
+            return # java_dumper_jar_path remains None
 
 class AbstractTest(unittest.TestCase):
     def find_private_key(self, ks, alias):
@@ -69,6 +108,42 @@ class AbstractTest(unittest.TestCase):
         self.assertEqual(sk.algorithm, algorithm_name)
         self.assertEqual(sk.key_size, key_size)
         self.assertEqual(sk.key, key_bytes)
+
+    def java_roundtrip_store(self, store, store_password):
+        """
+        Saves the given keystore to a temporary file on disk, and feeds it to a Java keystore dumper utility
+        that will read it out and return a dump of its contents in JSON form. Returns that JSON content dump
+        as a Python data structure.
+        """
+        with tempfile_path() as f:
+            store.save(f, store_password)
+            return self.java_store2json(store.store_type, f, store_password)
+            # temporary file is deleted upon exiting the with-context
+
+    @classmethod
+    def java_store2json(cls, store_type, store_path, store_password, entry_passwords=None):
+        """
+        Reads a store on disk using a Java keystore dumper utility and returns a dump of its content (as seen by Java) as a JSON data structure.
+        """
+        if not java_dumper_jar_path: # populated in setUpModule() iff we were able to build the utility's JAR
+            raise unittest.SkipTest("org.pyjks.KeystoreDumper Java utility not built; unable to verify saved keystore contents with Java")
+        if not os.path.exists(java_dumper_jar_path):
+            raise unittest.SkipTest("Java KeystoreDumper utility was built, but its JAR file was not found at expected location '%s'" % (java_dumper_jar_path,))
+
+        # Note: both store/entry passwords and entry aliases may contain arbitrary unicode character, which might not survive
+        # the process call intact if you pass them as bare argument (depends on system default encoding, etc.).
+        # So we pass them as base64-encoded UTF-8 instead.
+        command = ["java", "-cp", java_dumper_jar_path, java_dumper_main_class, store_type, store_path, base64.b64encode(store_password.encode("utf-8"))]
+
+        entry_passwords = (entry_passwords or {})
+        for alias, pw in entry_passwords.items():
+            command += [base64.b64encode(alias.encode("utf-8")),
+                        base64.b64encode(pw.encode("utf-8"))]
+
+        output = subprocess.check_output(command)
+        output = output.decode("utf-8", "strict") # KeystoreDumper emits UTF-8 encoded JSON
+        xjson = json.loads(output, encoding="utf-8")
+        return xjson
 
 class JksAndJceksLoadTests(AbstractTest):
     """
