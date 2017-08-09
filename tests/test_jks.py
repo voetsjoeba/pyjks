@@ -784,7 +784,7 @@ class MiscTests(AbstractTest):
         self.assertRaises(jks.util.BadDataLengthException, jks.rfc7292.decrypt_PBEWithSHAAndTwofishCBC, b"\x00", "", b"", 20)
 
     def test_filter_attributes(self):
-        ks = jks.KeyStore("jks", {})
+        ks = jks.KeyStore("jceks", {})
         self.assertEqual(len(list(ks.private_keys)), 0)
         self.assertEqual(len(list(ks.secret_keys)), 0)
         self.assertEqual(len(list(ks.certs)), 0)
@@ -797,13 +797,33 @@ class MiscTests(AbstractTest):
             "5": jks.TrustedCertEntry(),
             "6": jks.PrivateKeyEntry()
         }
-        ks = jks.KeyStore("jks", dummy_entries)
+        ks = jks.KeyStore("jceks", dummy_entries)
         self.assertEqual(len(ks.private_keys), 1)
         self.assertEqual(len(ks.secret_keys), 3)
         self.assertEqual(len(ks.certs), 2)
         self.assertTrue(all(a in ks.secret_keys for a in ["1", "2", "3"]))
         self.assertTrue(all(a in ks.private_keys for a in ["6"]))
         self.assertTrue(all(a in ks.certs for a in ["4", "5"]))
+
+        ks = jks.bks.BksKeyStore("bks", {})
+        self.assertEqual(0, len(ks.certs))
+        self.assertEqual(0, len(ks.secret_keys))
+        self.assertEqual(0, len(ks.sealed_keys))
+        self.assertEqual(0, len(ks.plain_keys))
+
+        dummy_entries = {
+            "1": jks.bks.BksSealedKeyEntry(),
+            "2": jks.bks.BksSealedKeyEntry(),
+            "3": jks.bks.BksSealedKeyEntry(),
+            "4": jks.bks.BksKeyEntry(jks.bks.BksKeyEntry.KEY_TYPE_PRIVATE, "PKCS#8", "RSA", expected.RSA1024.private_key),
+            "5": jks.bks.BksSecretKeyEntry(),
+            "6": jks.bks.BksTrustedCertEntry()
+        }
+        ks = jks.bks.BksKeyStore("bks", dummy_entries)
+        self.assertEqual(3, len(ks.sealed_keys))
+        self.assertEqual(1, len(ks.secret_keys))
+        self.assertEqual(1, len(ks.plain_keys))
+        self.assertEqual(1, len(ks.certs))
 
     def test_try_decrypt_keys(self):
         # as applied to secret keys
