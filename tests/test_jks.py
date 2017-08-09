@@ -250,35 +250,22 @@ class JceSecretKeyLoadTests(AbstractTest):
     """
     Tests specifically involving reading SecretKeys in JCEKS keystores
     """
+    def _test_load_secret_key(self, store_path, store_pw, alias, expected_alg, expected_key):
+        store = jks.KeyStore.load(KS_PATH + store_path, store_pw)
+        sk = self.find_secret_key(store, alias)
+        self.assertEqual(store.store_type, "jceks")
+        self.check_secret_key_equal(sk, expected_alg, len(expected_key)*8, expected_key)
+
     def test_des_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/DES.jceks", "12345678")
-        sk = self.find_secret_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(sk, "DES", 64, b"\x4c\xf2\xfe\x91\x5d\x08\x2a\x43")
-
+        self._test_load_secret_key("/jceks/DES.jceks", "12345678", "mykey", "DES", b"\x4c\xf2\xfe\x91\x5d\x08\x2a\x43")
     def test_desede_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/DESede.jceks", "12345678")
-        sk = self.find_secret_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(sk, "DESede", 192, b"\x67\x5e\x52\x45\xe9\x67\x3b\x4c\x8f\xc1\x94\xce\xec\x43\x3b\x31\x8c\x45\xc2\xe0\x67\x5e\x52\x45")
-
+        self._test_load_secret_key("/jceks/DESede.jceks", "12345678", "mykey", "DESede", b"\x67\x5e\x52\x45\xe9\x67\x3b\x4c\x8f\xc1\x94\xce\xec\x43\x3b\x31\x8c\x45\xc2\xe0\x67\x5e\x52\x45")
     def test_aes128_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/AES128.jceks", "12345678")
-        sk = self.find_secret_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(sk, "AES", 128, b"\x66\x6e\x02\x21\xcc\x44\xc1\xfc\x4a\xab\xf4\x58\xf9\xdf\xdd\x3c")
-
+        self._test_load_secret_key("/jceks/AES128.jceks", "12345678", "mykey", "AES", b"\x66\x6e\x02\x21\xcc\x44\xc1\xfc\x4a\xab\xf4\x58\xf9\xdf\xdd\x3c")
     def test_aes256_secret_key(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/AES256.jceks", "12345678")
-        sk = self.find_secret_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(sk, "AES", 256, b"\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f\x68\x77\x12\xfd\xe4\xbe\x52\xe9\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f")
-
+        self._test_load_secret_key("/jceks/AES256.jceks", "12345678", "mykey", "AES", b"\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f\x68\x77\x12\xfd\xe4\xbe\x52\xe9\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f")
     def test_pbkdf2_hmac_sha1(self):
-        store = jks.KeyStore.load(KS_PATH + "/jceks/PBKDF2WithHmacSHA1.jceks", "12345678")
-        sk = self.find_secret_key(store, "mykey")
-        self.assertEqual(store.store_type, "jceks")
-        self.check_secret_key_equal(sk, "PBKDF2WithHmacSHA1", 256, b"\x57\x95\x36\xd9\xa2\x7f\x7e\x31\x4e\xf4\xe3\xff\xa5\x76\x26\xef\xe6\x70\xe8\xf4\xd2\x96\xcd\x31\xba\x1a\x82\x7d\x9a\x3b\x1e\xe1")
+        self._test_load_secret_key("/jceks/PBKDF2WithHmacSHA1.jceks", "12345678", "mykey", "PBKDF2WithHmacSHA1", b"\x57\x95\x36\xd9\xa2\x7f\x7e\x31\x4e\xf4\xe3\xff\xa5\x76\x26\xef\xe6\x70\xe8\xf4\xd2\x96\xcd\x31\xba\x1a\x82\x7d\x9a\x3b\x1e\xe1")
 
     def test_unknown_type_of_sealed_object(self):
         """Verify that an exception is raised when encountering a (serialized) Java object inside a SecretKey entry that is not of type javax.crypto.SealedObject"""
