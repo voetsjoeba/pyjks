@@ -285,29 +285,26 @@ class JksAndJceksSaveTests(AbstractTest):
     """
     Test cases that apply to writing either JKS or JCEKS stores.
     """
-    def test_load_and_save_rsa_keystore(self):
-        with open(KS_PATH + "/jks/RSA2048_3certs.jks", 'rb') as file:
+    def _test_jks_nodecrypt_roundtrip_identical(self, store_path, store_pw):
+        """
+        Specific test for JKS keystores:
+          If you load a JKS keystore, don't decrypt any of the keys, save it back out with the same store password, and you also happen to get the entries
+          written out in the same order as the original, then you should get byte-identical output.
+        """
+        with open(KS_PATH + store_path, 'rb') as file:
             keystore_bytes = file.read()
-        store = jks.KeyStore.loads(keystore_bytes, "12345678", False)
-        resaved_keystore_bytes = store.saves('12345678')
-        # since we didn't decrypt the key, the keystores should be identical
-        self.assertEqual(keystore_bytes, resaved_keystore_bytes)
+        store = jks.KeyStore.loads(keystore_bytes, store_pw, try_decrypt_keys=False)
+        resaved = store.saves(store_pw)
+        self.assertEqual(keystore_bytes, resaved)
 
-    def test_load_and_save_dsa_keystore(self):
-        with open(KS_PATH + "/jks/DSA2048.jks", 'rb') as file:
-            keystore_bytes = file.read()
-        store = jks.KeyStore.loads(keystore_bytes, "12345678", False)
-        resaved_keystore_bytes = store.saves('12345678')
-        # since we didn't decrypt the key, the keystores should be identical
-        self.assertEqual(keystore_bytes, resaved_keystore_bytes)
-
-    def test_load_and_save_keystore_non_ascii_password(self):
-        with open(KS_PATH + "/jks/non_ascii_password.jks", 'rb') as file:
-            keystore_bytes = file.read()
-        store = jks.KeyStore.loads(keystore_bytes, u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029", False)
-        resaved_keystore_bytes = store.saves(u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029")
-        # since we didn't decrypt the key, the keystores should be identical
-        self.assertEqual(keystore_bytes, resaved_keystore_bytes)
+    def test_jks_nodecrypt_roundtrip_rsa1024(self):
+        self._test_jks_nodecrypt_roundtrip_identical("/jks/RSA1024.jks", "12345678")
+    def test_jks_nodecrypt_roundtrip_rsa2048(self):
+        self._test_jks_nodecrypt_roundtrip_identical("/jks/RSA2048_3certs.jks", "12345678")
+    def test_jks_nodecrypt_roundtrip_dsa(self):
+        self._test_jks_nodecrypt_roundtrip_identical("/jks/DSA2048.jks", "12345678")
+    def test_jks_nodecrypt_roundtrip_non_ascii_password(self):
+        self._test_jks_nodecrypt_roundtrip_identical("/jks/non_ascii_password.jks", u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029")
 
     def test_create_and_load_keystore_non_ascii_password(self):
         cert = jks.PrivateKeyEntry.new('mykey', expected.jks_non_ascii_password.certs, expected.jks_non_ascii_password.private_key)
