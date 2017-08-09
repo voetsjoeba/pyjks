@@ -331,22 +331,27 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         if self.is_decrypted():
             return
 
-        plaintext = None
         sealed_obj = self._encrypted
+
+        # convert between javaobj's internal byte[] representation and a Python bytes() object
+        encodedParams = java_bytestring(sealed_obj.encodedParams)
+        encryptedContent = java_bytestring(sealed_obj.encryptedContent)
+
+        plaintext = None
         if sealed_obj.sealAlg == "PBEWithMD5AndTripleDES":
             # if the object was sealed with PBEWithMD5AndTripleDES
             # then the parameters should apply to the same algorithm
             # and not be empty or null
             if sealed_obj.paramsAlg != sealed_obj.sealAlg:
                 raise UnexpectedAlgorithmException("Unexpected parameters algorithm used in SealedObject; should match sealing algorithm '%s' but found '%s'" % (sealed_obj.sealAlg, sealed_obj.paramsAlg))
-            if sealed_obj.encodedParams is None or len(sealed_obj.encodedParams) == 0:
+            if encodedParams is None or len(encodedParams) == 0:
                 raise UnexpectedJavaTypeException("No parameters found in SealedObject instance for sealing algorithm '%s'; need at least a salt and iteration count to decrypt" % sealed_obj.sealAlg)
 
-            params_asn1 = asn1_checked_decode(sealed_obj.encodedParams, asn1Spec=rfc2898.PBEParameter())
+            params_asn1 = asn1_checked_decode(encodedParams, asn1Spec=rfc2898.PBEParameter())
             salt = params_asn1['salt'].asOctets()
             iteration_count = int(params_asn1['iterationCount'])
             try:
-                plaintext = sun_crypto.jce_pbe_decrypt(sealed_obj.encryptedContent, key_password, salt, iteration_count)
+                plaintext = sun_crypto.jce_pbe_decrypt(encryptedContent, key_password, salt, iteration_count)
             except sun_crypto.BadPaddingException:
                 raise DecryptionFailureException("Failed to decrypt data for secret key '%s'; bad password?" % self.alias)
         else:
@@ -848,11 +853,6 @@ class KeyStore(AbstractKeystore):
         sealed_obj, pos = cls._read_java_obj(data, pos, ignore_remaining_data=True)
         if not java_is_subclass(sealed_obj, "javax.crypto.SealedObject"):
             raise UnexpectedJavaTypeException("Unexpected sealed object type '%s'; not a subclass of javax.crypto.SealedObject" % sealed_obj.get_class().name)
-
-        if sealed_obj.encryptedContent:
-            sealed_obj.encryptedContent = java_bytestring(sealed_obj.encryptedContent)
-        if sealed_obj.encodedParams:
-            sealed_obj.encodedParams = java_bytestring(sealed_obj.encodedParams)
 
         entry = SecretKeyEntry(sealed_obj=sealed_obj, store_type=store_type)
         return entry, pos
