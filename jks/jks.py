@@ -140,11 +140,14 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
                   cert_chain = cert_chain)
 
         if key_format == 'pkcs8':
-            private_key_info = asn1_checked_decode(key, asn1Spec=rfc5208.PrivateKeyInfo())
+            try:
+                private_key_info = asn1_checked_decode(key, asn1Spec=rfc5208.PrivateKeyInfo())
 
-            pke._algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
-            pke.pkey = private_key_info['privateKey'].asOctets()
-            pke.pkey_pkcs8 = key
+                pke._algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
+                pke.pkey = private_key_info['privateKey'].asOctets()
+                pke.pkey_pkcs8 = key
+            except PyAsn1Error as e:
+                raise BadKeyEncodingException("Failed to parse provided key as a PKCS#8 PrivateKeyInfo structure", e)
 
         elif key_format == 'rsa_raw':
             pke._algorithm_oid = RSA_ENCRYPTION_OID
@@ -187,7 +190,12 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         if self.is_decrypted():
             return
 
-        encrypted_info = asn1_checked_decode(self._encrypted, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())
+        encrypted_info = None
+        try:
+            encrypted_info = asn1_checked_decode(self._encrypted, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())
+        except PyAsn1Error as e:
+            raise DecryptionFailureException("Failed to decrypt data for private key '%s': %s" % (self.alias, str(e),), e)
+
         algo_id = encrypted_info['encryptionAlgorithm']['algorithm'].asTuple()
         algo_params = encrypted_info['encryptionAlgorithm']['parameters'].asOctets()
         encrypted_private_key = encrypted_info['encryptedData'].asOctets()
@@ -211,8 +219,18 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         except (BadHashCheckException, BadPaddingException):
             raise DecryptionFailureException("Failed to decrypt data for private key '%s'; wrong password?" % self.alias)
 
-        # at this point, 'plaintext' is a PKCS#8 PrivateKeyInfo (see RFC 5208)
-        private_key_info = asn1_checked_decode(plaintext, asn1Spec=rfc5208.PrivateKeyInfo())
+        # In JCEKS stores, the key protection scheme is password-based encryption with PKCS#5/7 padding, so wrong passwords have
+        # a 1/256? chance of producing a 0x01 byte as the last byte and passing the padding check but producing garbage plaintext.
+
+        # The plaintext should be a DER-encoded PKCS#8 PrivateKeyInfo, so try to parse it as such; if that fails, then
+        # either the password was wrong and we hit a 1/256 case, or the password was right and the data is genuinely corrupt.
+        # In sane use cases the latter shouldn't happen, so let's assume the former.
+        private_key_info = None
+        try:
+            private_key_info = asn1_checked_decode(plaintext, asn1Spec=rfc5208.PrivateKeyInfo())
+        except PyAsn1Error as e:
+            raise DecryptionFailureException("Failed to decrypt data for private key '%s'; wrong password?" % (self.alias,))
+
         key = private_key_info['privateKey'].asOctets()
         algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
 

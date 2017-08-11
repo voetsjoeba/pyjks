@@ -210,6 +210,42 @@ class JksAndJceksLoadTests(AbstractTest):
         self.assertEqual(store.store_type, "jks")
         self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.jks_non_ascii_password.private_key, expected.jks_non_ascii_password.certs)
 
+    def test_jceks_bad_private_key_decrypt(self):
+        # In JCEKS stores, the key protection scheme is password-based encryption with PKCS#5/7 padding, so any wrong password has a 1/256
+        # chance of producing a 0x01 byte as the last byte and passing the padding check but producing garbage plaintext.
+        # Make sure we can tell when that happens.
+
+        # Here's a dummy PKCS#8 structure, and its encrypted form under chosen parameters password, salt and iteration count:
+        pkcs8_plaintext = b"\x30\x15\x02\x01\x00\x30\x0d\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01\x05\x00\x04\x01\xff"
+
+        correct_password = "private_password"
+        salt = b"\x74\x9f\xf1\x03\x42\x63\x28\x1c"
+        iteration_count = 1677
+        ciphertext = b"\xc5\x3d\x8e\x3d\x0f\x64\x8f\xbb\xb0\xe9\x10\x67\xe2\xdd\xbf\xb2\xc3\xcf\x44\x4b\x46\x5f\x57\x1f"
+
+        self.assertEqual(pkcs8_plaintext, jks.sun_crypto.jce_pbe_decrypt(ciphertext, correct_password, salt, iteration_count))
+
+        # Here's another password such that decrypting the ciphertext (with the same salt and iterationcount) produces plaintext ending in \x01 (prior to stripping padding):
+        wrong_password = "{bpJs}+?"
+
+        # Now check that creating a PrivateKeyEntry from this encrypted form and trying to decrypt it with the wrong password
+        # notices that the resulting plaintext is garbage:
+        pbe_params = jks.rfc2898.PBEParameter()
+        pbe_params.setComponentByName('salt', salt)
+        pbe_params.setComponentByName('iterationCount', iteration_count)
+        a = rfc2459.AlgorithmIdentifier()
+        a.setComponentByName('algorithm', jks.sun_crypto.SUN_JCE_ALGO_ID)
+        a.setComponentByName('parameters', encoder.encode(pbe_params))
+        epki = jks.rfc5208.EncryptedPrivateKeyInfo()
+        epki.setComponentByName('encryptionAlgorithm', a)
+        epki.setComponentByName('encryptedData', ciphertext)
+        epki_bytes = encoder.encode(epki)
+
+        pk = jks.PrivateKeyEntry(encrypted=epki_bytes, store_type="jceks")
+        self.assertRaises(DecryptionFailureException, pk.decrypt, wrong_password)
+        pk.decrypt(correct_password) # shouldn't throw
+        self.assertEqual(pk.pkey_pkcs8, pkcs8_plaintext)
+
 class JksAndJceksSaveTests(AbstractTest):
     """
     Test cases that apply to writing either JKS or JCEKS stores.
