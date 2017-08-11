@@ -1,8 +1,10 @@
 # vim: set et ai ts=4 sts=4 sw=4:
 import struct
 import hashlib
+import time
 from pyasn1_modules import rfc5208, rfc2459
 from Crypto.Hash import HMAC, SHA
+from Crypto.Random import random as CRandom
 from .util import *
 from .base import *
 from .jks import KeyStore, TrustedCertEntry
@@ -202,6 +204,21 @@ class BksSealedKeyEntry(AbstractBksEntry):
     decrypt.__doc__ = AbstractBksEntry.decrypt.__doc__
     is_decrypted.__doc__ = AbstractBksEntry.is_decrypted.__doc__
 
+    def _encrypt_for(self, store_type, key_password):
+        if not self.is_decrypted():
+            return self._encrypted
+
+        salt = os.urandom(20)
+        iteration_count = CRandom.randint(1024, 2047)
+
+        bkskey_encoded = BksKeyStore._write_bks_key(self._nested)
+        ciphertext = rfc7292.encrypt_PBEWithSHAAnd3KeyTripleDESCBC(bkskey_encoded, key_password, salt, iteration_count)
+
+        encrypted_form = BksKeyStore._write_data(salt)
+        encrypted_form += b4.pack(iteration_count)
+        encrypted_form += ciphertext
+
+        return encrypted_form
 
 class BksKeyStore(AbstractKeystore):
     """
@@ -216,6 +233,23 @@ class BksKeyStore(AbstractKeystore):
         super(BksKeyStore, self).__init__(store_type, entries)
         self.version = version
         """Version of the keystore format, if loaded."""
+
+    @classmethod
+    def new(cls, store_type, entry_list):
+        if store_type not in ["bks", "uber"]:
+            raise UnsupportedKeystoreTypeException("The Keystore type '%s' is not supported" % (store_type,))
+
+        entries = {}
+        for entry in entry_list:
+            if not isinstance(entry, AbstractBksEntry):
+                raise UnsupportedKeystoreEntryTypeException("Entries must be of type AbstractBksEntry")
+
+            alias = entry.alias
+            if alias in entries:
+                raise DuplicateAliasException("Found duplicate alias '%s'" % alias)
+            entries[alias] = entry
+
+        return cls(store_type, entries)
 
     @property
     def certs(self):
@@ -343,6 +377,108 @@ class BksKeyStore(AbstractKeystore):
 
         return (entries, pos)
 
+    def saves(self, store_password, entry_passwords=None):
+        store_data = self._write_bks_entries(store_password, entry_passwords=entry_passwords)
+
+        salt = os.urandom(20)
+        iteration_count = CRandom.randint(1024, 2047)
+
+        version = 2
+        result = b4.pack(version)
+        result += self._write_data(salt)
+        result += b4.pack(iteration_count)
+
+        hmac_fn = hashlib.sha1
+        hmac_digest_size = hmac_fn().digest_size
+        hmac_key_size = hmac_digest_size*8 if version >= 2 else hmac_digest_size
+        hmac_key = rfc7292.derive_key(hmac_fn, rfc7292.PURPOSE_MAC_MATERIAL, store_password, salt, iteration_count, hmac_key_size//8)
+
+        hmac = HMAC.new(hmac_key, digestmod=SHA)
+        hmac.update(store_data)
+        store_hmac = hmac.digest()
+
+        result += store_data
+        result += store_hmac
+        return result
+
+    def _write_bks_entries(self, store_password, entry_passwords=None):
+        entry_passwords = (entry_passwords or {})
+
+        result = b""
+        for alias, entry in self.entries.items():
+            entry_password = entry_passwords.get(alias, store_password)
+
+            if isinstance(entry, BksTrustedCertEntry):
+                result += self._write_bks_cert_entry(entry)
+            elif isinstance(entry, BksKeyEntry):
+                result += self._write_bks_key_entry(entry)
+            elif isinstance(entry, BksSecretKeyEntry):
+                result += self._write_bks_secret_key_entry(entry)
+            elif isinstance(entry, BksSealedKeyEntry):
+                encrypted_form = entry._encrypt_for(self.store_type, entry_password)
+                result += self._write_bks_sealed_key_entry(entry, encrypted_form)
+            else:
+                raise UnsupportedKeystoreEntryTypeException("Unexpected keystore entry type %s", type(entry))
+
+        result += b1.pack(0)
+        return result
+
+    @classmethod
+    def _write_bks_cert_entry(cls, entry):
+        result = b1.pack(cls.ENTRY_TYPE_CERTIFICATE)
+        result += cls._write_alias_timestamp_chain(entry)
+        result += cls._write_utf(entry.type)
+        result += cls._write_data(entry.cert)
+        return result
+
+    @classmethod
+    def _write_bks_key_entry(cls, entry):
+        result = b1.pack(cls.ENTRY_TYPE_KEY)
+        result += cls._write_alias_timestamp_chain(entry)
+        result += cls._write_bks_key(entry)
+
+    @classmethod
+    def _write_bks_key(cls, bkskey):
+        """Note: not to be confused with _write_bks_key_entry; this method writes a BksKey only, not an entire entry."""
+        result = b1.pack(bkskey.type) # public/private/secret
+        result += cls._write_utf(bkskey.format)
+        result += cls._write_utf(bkskey.algorithm)
+
+        if bkskey.type == BksKeyEntry.KEY_TYPE_PRIVATE:
+            result += cls._write_data(bkskey.pkey_pkcs8)
+        elif bkskey.type == BksKeyEntry.KEY_TYPE_PUBLIC:
+            result += cls._write_data(bkskey.public_key_info)
+        elif bkskey.type == BksKeyEntry.KEY_TYPE_SECRET:
+            result += cls._write_data(bkskey.key)
+        else:
+            raise BadKeystoreFormatException("Invalid BKS key type") # TODO
+
+        return result
+
+    @classmethod
+    def _write_bks_secret_key_entry(cls, entry):
+        result = b1.pack(cls.ENTRY_TYPE_SECRET)
+        result += cls._write_alias_timestamp_chain(entry)
+        result += cls._write_data(entry.key)
+        return result
+
+    @classmethod
+    def _write_bks_sealed_key_entry(cls, entry, encrypted_form):
+        result = b1.pack(cls.ENTRY_TYPE_SEALED)
+        result += cls._write_alias_timestamp_chain(entry)
+        result += cls._write_data(encrypted_form)
+        return result
+
+    @classmethod
+    def _write_alias_timestamp_chain(cls, entry):
+        result  = cls._write_utf(entry.alias)
+        result += b8.pack(entry.timestamp)
+        result += b4.pack(len(entry.cert_chain))
+        for tcert in entry.cert_chain:
+            result += cls._write_utf(tcert.type)
+            result += cls._write_data(tcert.cert)
+        return result
+
     @classmethod
     def _read_bks_cert(cls, data, pos, store_type):
         cert_type, pos = cls._read_utf(data, pos, kind="certificate type")
@@ -443,7 +579,24 @@ class UberKeyStore(BksKeyStore):
         except struct.error as e:
             raise BadKeystoreFormatException(e)
 
+    def saves(self, store_password, entry_passwords=None):
+        store_data = self._write_bks_entries(store_password, entry_passwords=entry_passwords)
+        store_data += hashlib.sha1(store_data).digest()
+
+        salt = os.urandom(20)
+        iteration_count = CRandom.randint(1024, 2047)
+
+        result = b4.pack(1)
+        result += self._write_data(salt)
+        result += b4.pack(iteration_count)
+
+        encrypted_store_data = rfc7292.encrypt_PBEWithSHAAndTwofishCBC(store_data, store_password, salt, iteration_count)
+
+        result += encrypted_store_data
+        return result
+
     def __init__(self, store_type, entries, version=1):
         super(UberKeyStore, self).__init__(store_type, entries, version=version)
         self.version = version # only here so Sphinx documents the field
         """Version of the keystore format, if loaded."""
+

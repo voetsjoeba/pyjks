@@ -93,6 +93,16 @@ def decrypt_PBEWithSHAAnd3KeyTripleDESCBC(data, password_str, salt, iteration_co
     decrypted = strip_pkcs7_padding(decrypted, 8)
     return decrypted
 
+def encrypt_PBEWithSHAAnd3KeyTripleDESCBC(data, password_str, salt, iteration_count):
+    iv  = derive_key(hashlib.sha1, PURPOSE_IV_MATERIAL,  password_str, salt, iteration_count, 64//8)
+    key = derive_key(hashlib.sha1, PURPOSE_KEY_MATERIAL, password_str, salt, iteration_count, 192//8)
+
+    padded = add_pkcs7_padding(data, 8)
+    des3 = DES3.new(key, DES3.MODE_CBC, IV=iv)
+    ciphertext = des3.encrypt(padded)
+
+    return ciphertext
+
 def decrypt_PBEWithSHAAndTwofishCBC(encrypted_data, password, salt, iteration_count):
     """
     Decrypts PBEWithSHAAndTwofishCBC, assuming PKCS#12-generated PBE parameters.
