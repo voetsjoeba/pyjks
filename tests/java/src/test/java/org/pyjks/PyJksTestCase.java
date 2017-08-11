@@ -100,12 +100,14 @@ public class PyJksTestCase
 		String certsPadding      = StringUtils.repeat(" ", "certs = [".length());
 
 		StringBuffer sb = new StringBuffer();
-		sb.append("public_key = ");
-		sb.append(StringUtils.stripStart(toPythonString(keyPair.getPublic().getEncoded(), 32, publicKeyPadding), null));
-		sb.append("\n");
-		sb.append("private_key = ");
-		sb.append(StringUtils.stripStart(toPythonString(keyPair.getPrivate().getEncoded(), 32, privateKeyPadding), null));
-		sb.append("\n");
+		if (keyPair != null){
+			sb.append("public_key = ");
+			sb.append(StringUtils.stripStart(toPythonString(keyPair.getPublic().getEncoded(), 32, publicKeyPadding), null));
+			sb.append("\n");
+			sb.append("private_key = ");
+			sb.append(StringUtils.stripStart(toPythonString(keyPair.getPrivate().getEncoded(), 32, privateKeyPadding), null));
+			sb.append("\n");
+		}
 		sb.append("certs = [");
 		for (int i = 0; i < certs.length; i++)
 		{

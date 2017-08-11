@@ -370,6 +370,23 @@ class JksAndJceksLoadTests(AbstractTest):
         self._test_unicode_passwords("jks")
         self._test_unicode_passwords("jceks")
 
+    def _test_unicode_aliases(self, store_type):
+        fancy_alias_1 = u"\u0000\u0061\u00b3\u05e4\u080a\ud7fb\ue000\uffee\U000100a6"
+        fancy_alias_2 = u"\U000100a6\uffee\ue000\ud7fb\u080a\u05e4\u00b3\u0061\u0000"
+
+        store = jks.KeyStore.load(KS_PATH + "/{0}/unicode_aliases.{0}".format(store_type), "12345678")
+        self.assertEqual(store.store_type, store_type)
+
+        cert1 = self.find_cert(store, fancy_alias_1)
+        cert2 = self.find_cert(store, fancy_alias_2)
+
+        self.check_cert_equal(cert1, "X.509", expected.unicode_aliases.certs[0])
+        self.check_cert_equal(cert2, "X.509", expected.unicode_aliases.certs[1])
+
+    def test_unicode_aliases(self):
+        self._test_unicode_aliases("jks")
+        self._test_unicode_aliases("jceks")
+
     def test_jceks_bad_private_key_decrypt(self):
         # In JCEKS stores, the key protection scheme is password-based encryption with PKCS#5/7 padding, so any wrong password has a 1/256
         # chance of producing a 0x01 byte as the last byte and passing the padding check but producing garbage plaintext.
@@ -531,7 +548,7 @@ class JksAndJceksSaveTests(AbstractTest):
         self.assertRaises(IllegalPasswordCharactersException, self._test_create_and_load_keystore, "jceks", "12345678", items, entry_passwords={"mykey": fancy_password}) # show that the issue is with the key's password ...
         self._test_create_and_load_keystore("jceks", fancy_password, items, entry_passwords={"mykey": "12345678"}) # ... not the store password.
 
-    def test_create_and_load_non_ascii_alias(self):
+    def test_create_and_load_unicode_aliases(self):
         fancy_alias = u"\xe6\xe6\xe6\xf8\xf8\xf8\xe5\xe5\xf8\xe6"
         pk = jks.PrivateKeyEntry.new(fancy_alias, expected.RSA1024.certs, expected.RSA1024.private_key)
 

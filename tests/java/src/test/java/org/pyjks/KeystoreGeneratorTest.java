@@ -157,4 +157,39 @@ public class KeystoreGeneratorTest extends PyJksTestCase
 
 		writePythonDataFile("../expected/unicode_passwords.py", keyPair, certs);
 	}
+
+	@Test
+	public void generate_unicode_aliases() throws Exception
+	{
+		KeyPair keyPair = generateKeyPair("RSA", 1024);
+		Certificate cert1 = createSelfSignedCertificate(keyPair, "CN=unicode_aliases, O=1");
+		Certificate cert2 = createSelfSignedCertificate(keyPair, "CN=unicode_aliases, O=2");
+		Certificate[] certs = new Certificate[]{cert1, cert2};
+
+		Map<String, KeyStore.Entry> entriesByAlias = new HashMap<String, KeyStore.Entry>();
+		Map<String, String> passwordsByAlias = new HashMap<String, String>();
+
+		// use some code points from various different unicode blocks/encoding ranges and/or some special characters
+		int[] codePoints = new int[]{
+			0x00000000, // NUL
+			0x00000061, // a                                   range 0x0000 - 0x007F
+			0x000000B3, // superscript three                   range 0x0080 - 0x07FF (note: lowercase because JKS stores will convert input aliases to lowercase)
+			0x000005E4, // hebrew letter PE                    range 0x0080 - 0x07FF
+			0x0000080A, // samaritan letter kaaf               range 0x0800 - 0xD800
+			0x0000D7FB, // hangul jongseong phieuph-thieuth    range 0x0800 - 0xD800
+			0x0000E000, // private use area                    range 0xE000 - 0xFFFF
+			0x0000FFEE, // halfwidth white circle              range 0xE000 - 0xFFFF
+			0x000100A6, // linear b ideogram b158              range 0x10000 - 0x10FFFF
+		};
+		String fancyAlias1 = codePointsToString(codePoints);
+		String fancyAlias2 = codePointsToString(Arrays.reverse(codePoints)); // interesting because it ends with a null byte
+
+		entriesByAlias.put(fancyAlias1, new KeyStore.TrustedCertificateEntry(cert1));
+		entriesByAlias.put(fancyAlias2, new KeyStore.TrustedCertificateEntry(cert2));
+
+		generateKeyStore("JKS",   "../keystores/jks/unicode_aliases.jks",     entriesByAlias, passwordsByAlias, "12345678");
+		generateKeyStore("JCEKS", "../keystores/jceks/unicode_aliases.jceks", entriesByAlias, passwordsByAlias, "12345678");
+
+		writePythonDataFile("../expected/unicode_aliases.py", null, certs);
+	}
 }
