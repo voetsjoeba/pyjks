@@ -444,6 +444,10 @@ class JksAndJceksSaveTests(AbstractTest):
     def test_jks_nodecrypt_roundtrip_non_ascii_password(self):
         self._test_jks_nodecrypt_roundtrip_identical("/jks/non_ascii_password.jks", u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029")
 
+    def test_create_and_load_empty_keystore(self):
+        self._test_create_and_load_keystore("jks",   "12345678", [])
+        self._test_create_and_load_keystore("jceks", "12345678", [])
+
     def test_create_and_load_keystore_non_ascii_password(self):
         fancy_password = u"\u10DA\u0028\u0CA0\u76CA\u0CA0\u10DA\u0029"
         pk = jks.PrivateKeyEntry.new("mykey", expected.jks_non_ascii_password.certs, expected.jks_non_ascii_password.private_key)
