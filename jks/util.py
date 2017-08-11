@@ -263,3 +263,109 @@ def bytes2java(bytez):
 
     return array_obj
 
+def decode_modified_utf8(xbytes):
+    # Java's modified UTF-8 = CESU-8, except:
+    #   U+0000 is encoded in its overlong 2-byte sequence 0xC080 instead of single-byte 0x00.
+    return decode_cesu8(xbytes.replace(b"\xc0\x80", b"\x00"))
+
+def decode_cesu8(xbytes):
+    # CESU-8 = UTF-8, except:
+    #   supplementary characters (i.e. in the U+10000 to U+10FFFF range) are encoded by taking their UTF-16 representation as a pair of surrogate code points,
+    #   and encoding each one of those individually as though they were separate characters (they're not, they're surrogates; their code points are unassigned).
+    #   UTF-8 encodes code points in the range U+0800 to U+FFFF with 3 bytes, and there are 2 such surrogates, so that makes 6 bytes per supplementary character.
+    #
+    # The CESU-8 spec is surprisingly no-nonsense and concise, give it a read:
+    #   http://www.unicode.org/reports/tr26/
+    #
+    # So to implement this, there's a few things to consider:
+    #   - We want a strict encoder/decoder, because we need perfect interoperability with Java's modified UTF-8.
+    #
+    #   - A CESU-8/MUTF-8 decoder already exists in the ftfy.bad_codecs module, but it is explicitly designed to be non-validating and will accept input that Java rejects
+    #     (specifically, regular UTF-8 4-byte sequences).
+    #
+    #   - As of Python 3.1 there is a 'surrogatepass' error handler for the utf-8 decoder that can be used to let UTF-16 surrogate code points pass through (rather than
+    #     complain that those code points are unassigned) and handle them separately afterwards.
+    #     https://bugs.python.org/issue2857 has a good example of how it can be used.
+    #
+    #   - Python versions < 3.3 can come in wide or narrow builds; in the latter case, characters > U+FFFF cannot be represented as a single character in strings,
+    #     causing some subtle issues when writing algorithms that need to deal with them.
+    #
+    # So rather than deal with all possible combinations of quirks across Python versions, here's a manual, bit-twiddling, strict CESU-8 decoder that should
+    # work across any Python version/build. I'm sure it's super slow, but for our case our expected inputs are few and short, and we care much more about not
+    # corrupting keystores.
+    xbytes = bytearray(xbytes) # make xbytes[i] return int instead of str in Python 2.x (can't bit-shift strings)
+
+    # we expect our inputs to be short and to rarely contain any 'fancy' characters; it's likely we can skip any custom processing altogether
+    if all(b <= 0x7F for b in xbytes):
+        return xbytes.decode("ascii")
+
+    utf16 = bytearray()
+
+    BB = struct.Struct('BB')
+    L = len(xbytes)
+    i = 0
+    while i < L:
+        b = xbytes[i]
+        if b <= 0x7F:
+            # 0xxx.xxxx
+            utf16 += b2.pack(b)
+            i += 1
+        elif (b >> 4) in [0xC, 0xD]:
+            # 2-continuation: 110x.xxxx 10xx.xxxx
+            if not i + 1 < L:
+                raise ValueError("Invalid CESU-8: truncated character")
+            byte2 = xbytes[i+1]
+            if (byte2 & 0xC0) != 0x80:
+                raise ValueError("Invalid CESU-8: invalid continuation")
+            codepoint = ((b & 0x1F) << 6) | (byte2 & 0x3F)
+            if codepoint < 0x80: # reject overlong sequences
+                raise ValueError("Invalid CESU-8: overlong sequences not allowed")
+            utf16 += b2.pack(codepoint)
+            i += 2
+        elif (b >> 4) == 0xE:
+            # 3-continuation: 1110.xxxx 10xx.xxxx 10xx.xxxx
+            if not i + 2 < L:
+                raise ValueError("Invalid CESU-8: truncated character")
+            byte2 = xbytes[i+1]
+            byte3 = xbytes[i+2]
+            if not ((byte2 & 0xC0) == 0x80 and (byte3 & 0xC0) == 0x80):
+                raise ValueError("Invalid CESU-8: invalid continuation")
+            codepoint = ((b & 0x0F) << 12) | ((byte2 & 0x3F) << 6) | ((byte3 & 0x3F) << 0)
+            if codepoint < 0x800: # reject overlong sequences
+                raise ValueError("Invalid CESU-8: overlong sequences not allowed")
+            utf16 += b2.pack(codepoint)
+            i += 3
+        else:
+            # either a 4-continuation or a bad leader byte
+            raise ValueError("Invalid CESU-8")
+
+    return utf16.decode("utf-16be", "strict")
+
+def encode_modified_utf8(xstr):
+    return encode_cesu8(xstr).replace(b"\x00", b"\xc0\x80")
+
+def encode_cesu8(xstr):
+    BB = struct.Struct('BB')
+    BBB = struct.Struct('BBB')
+    result = bytearray()
+
+    utf16 = xstr.encode("utf-16be")
+    assert len(utf16) % 2 == 0
+
+    for i in range(0, len(utf16), 2):
+        code_unit = b2.unpack_from(utf16[i:i+2])[0]
+        if code_unit <= 0x007F:
+            result += b1.pack(code_unit)
+        elif code_unit > 0x07FF:
+            # this code unit is either a single character or part of a pair of surrogate code points;
+            # CESU-8 doesn't care about the difference and encodes either as a UTF-8 3-byte continuation
+            utf8_b1 = 0xE0 | ((code_unit >> 12) & 0x0F)
+            utf8_b2 = 0x80 | ((code_unit >> 6)  & 0x3F)
+            utf8_b3 = 0x80 | ((code_unit >> 0)  & 0x3F)
+            result += BBB.pack(utf8_b1, utf8_b2, utf8_b3)
+        else: # regular 2-byte continuation
+            utf8_b1 = 0xC0 | ((code_unit >> 6)  & 0x1F)
+            utf8_b2 = 0x80 | ((code_unit >> 0)  & 0x3F)
+            result += BB.pack(utf8_b1, utf8_b2)
+
+    return bytes(result)
