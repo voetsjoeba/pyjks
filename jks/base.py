@@ -34,16 +34,18 @@ class AbstractKeystore(object):
     @classmethod
     def _read_utf(cls, data, pos, kind=None):
         """
+        Reads a Java modified UTF-8 string at the given position in 'data', and returns the decoded string + the next position after the string.
         :param kind: Optional; a human-friendly identifier for the kind of UTF-8 data we're loading (e.g. is it a keystore alias? an algorithm identifier? something else?).
                      Used to construct more informative exception messages when a decoding error occurs.
         """
         size = b2.unpack_from(data, pos)[0]
         pos += 2
         try:
-            return data[pos:pos+size].decode('utf-8'), pos+size
-        except (UnicodeEncodeError, UnicodeDecodeError) as e:
-            raise BadKeystoreFormatException(("Failed to read %s, contains bad UTF-8 data: %s" % (kind, str(e))) if kind else \
-                                             ("Encountered bad UTF-8 data: %s" % str(e)))
+            # Both JKS/JCEKS and BKS/UBER keystores all write strings using DataOutputStream.writeUTF, which uses Java modified UTF-8
+            return decode_modified_utf8(data[pos:pos+size]), pos+size
+        except ValueError as e:
+            raise BadKeystoreFormatException(("Failed to read %s, contains bad Java modified UTF-8 data: %s" % (kind, str(e))) if kind else \
+                                             ("Encountered bad Java modified UTF-8 data: %s" % str(e)))
 
     @classmethod
     def _read_data(cls, data, pos):
@@ -55,10 +57,10 @@ class AbstractKeystore(object):
 
     @classmethod
     def _write_utf(cls, text):
-        encoded_text = text.encode('utf-8')
+        encoded_text = encode_modified_utf8(text)
         size = len(encoded_text)
         if size > 0xFFFF:
-            raise BadDataLengthException("Cannot write UTF-8 data; length exceeds maximum size")
+            raise BadDataLengthException("Cannot write Java modified UTF-8 encoded string; length exceeds maximum size")
         result = b2.pack(size)
         result += encoded_text
         return result
