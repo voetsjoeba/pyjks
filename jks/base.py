@@ -38,8 +38,10 @@ class AbstractKeystore(object):
         :param kind: Optional; a human-friendly identifier for the kind of UTF-8 data we're loading (e.g. is it a keystore alias? an algorithm identifier? something else?).
                      Used to construct more informative exception messages when a decoding error occurs.
         """
-        size = b2.unpack_from(data, pos)[0]
-        pos += 2
+        size = b2.unpack_from(data, pos)[0]; pos += 2
+        if size > len(data):
+            raise BadDataLengthException("Failed to read modified UTF-8 string; length exceeds remaining available data")
+
         try:
             # Both JKS/JCEKS and BKS/UBER keystores all write strings using DataOutputStream.writeUTF, which uses Java modified UTF-8
             return decode_modified_utf8(data[pos:pos+size]), pos+size

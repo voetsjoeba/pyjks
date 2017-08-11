@@ -387,6 +387,11 @@ class JksAndJceksLoadTests(AbstractTest):
         self._test_unicode_aliases("jks")
         self._test_unicode_aliases("jceks")
 
+    def test_invalid_data_lengths(self):
+        # Verifies that trying to read an oversized (modified) UTF-8 string, and/or an oversized data sequence, raises an exception
+        self.assertRaises(KeystoreException, jks.KeyStore.load, KS_PATH + "/jks/bad_alias_size.jks", "12345678")
+        self.assertRaises(KeystoreException, jks.KeyStore.load, KS_PATH + "/jks/bad_data_size.jks", "12345678")
+
     def test_jceks_bad_private_key_decrypt(self):
         # In JCEKS stores, the key protection scheme is password-based encryption with PKCS#5/7 padding, so any wrong password has a 1/256
         # chance of producing a 0x01 byte as the last byte and passing the padding check but producing garbage plaintext.
