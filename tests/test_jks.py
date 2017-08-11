@@ -11,9 +11,12 @@ import sys
 import unittest
 import hashlib
 import time
+from pyasn1.error import PyAsn1Error
+from pyasn1.codec.der import encoder
+from pyasn1_modules import rfc5208, rfc2459
 
 import jks
-from jks.util import py23basestring
+from jks.util import *
 from . import expected
 
 CUR_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -797,6 +800,13 @@ class MiscTests(AbstractTest):
         self.check_pkey_and_certs_equal(pk, jks.util.RSA_ENCRYPTION_OID, expected.RSA1024.private_key, expected.RSA1024.certs)
         dummy = pk.cert_chain
         pk.decrypt("wrong_password") # additional decrypt() calls should do nothing
+
+    def test_asn1_checked_decode(self):
+        bad_asn1 = b"\x00\x00" # will result in an EndOfOctets() object when decoding
+        good_asn1 = expected.RSA1024.private_key
+
+        asn1_checked_decode(good_asn1, rfc5208.PrivateKeyInfo())
+        self.assertRaises(PyAsn1Error, asn1_checked_decode, bad_asn1, rfc5208.PrivateKeyInfo())
 
 if __name__ == "__main__":
     unittest.main()

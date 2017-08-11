@@ -30,8 +30,8 @@ import struct
 import hashlib
 import javaobj
 import time
-from pyasn1.codec.ber import encoder, decoder
-from pyasn1_modules import rfc5208
+from pyasn1.codec.der import encoder
+from pyasn1_modules import rfc5208, rfc2459
 from pyasn1_modules.rfc2459 import AlgorithmIdentifier
 from pyasn1.type import univ, namedtype
 from . import rfc2898
@@ -136,11 +136,11 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
             cert_chain.append(('X.509', cert))
 
         pke = cls(timestamp = timestamp,
-                               alias = alias,
-                               cert_chain = cert_chain)
+                  alias = alias,
+                  cert_chain = cert_chain)
 
         if key_format == 'pkcs8':
-            private_key_info = decoder.decode(key, asn1Spec=rfc5208.PrivateKeyInfo())[0]
+            private_key_info = asn1_checked_decode(key, asn1Spec=rfc5208.PrivateKeyInfo())
 
             pke._algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
             pke.pkey = private_key_info['privateKey'].asOctets()
@@ -187,7 +187,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         if self.is_decrypted():
             return
 
-        encrypted_info = decoder.decode(self._encrypted, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())[0]
+        encrypted_info = asn1_checked_decode(self._encrypted, asn1Spec=rfc5208.EncryptedPrivateKeyInfo())
         algo_id = encrypted_info['encryptionAlgorithm']['algorithm'].asTuple()
         algo_params = encrypted_info['encryptionAlgorithm']['parameters'].asOctets()
         encrypted_private_key = encrypted_info['encryptedData'].asOctets()
@@ -201,7 +201,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
                 if self.store_type != "jceks":
                     raise UnexpectedAlgorithmException("Encountered JCEKS private key protection algorithm in JKS keystore")
                 # see RFC 2898, section A.3: PBES1 and definitions of AlgorithmIdentifier and PBEParameter
-                params = decoder.decode(algo_params, asn1Spec=rfc2898.PBEParameter())[0]
+                params = asn1_checked_decode(algo_params, asn1Spec=rfc2898.PBEParameter())
                 salt = params['salt'].asOctets()
                 iteration_count = int(params['iterationCount'])
                 plaintext = sun_crypto.jce_pbe_decrypt(encrypted_private_key, key_password, salt, iteration_count)
@@ -212,7 +212,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
             raise DecryptionFailureException("Failed to decrypt data for private key '%s'; wrong password?" % self.alias)
 
         # at this point, 'plaintext' is a PKCS#8 PrivateKeyInfo (see RFC 5208)
-        private_key_info = decoder.decode(plaintext, asn1Spec=rfc5208.PrivateKeyInfo())[0]
+        private_key_info = asn1_checked_decode(plaintext, asn1Spec=rfc5208.PrivateKeyInfo())
         key = private_key_info['privateKey'].asOctets()
         algorithm_oid = private_key_info['privateKeyAlgorithm']['algorithm'].asTuple()
 
@@ -304,7 +304,7 @@ class SecretKeyEntry(AbstractKeystoreEntry):
             if sealed_obj.encodedParams is None or len(sealed_obj.encodedParams) == 0:
                 raise UnexpectedJavaTypeException("No parameters found in SealedObject instance for sealing algorithm '%s'; need at least a salt and iteration count to decrypt" % sealed_obj.sealAlg)
 
-            params_asn1 = decoder.decode(sealed_obj.encodedParams, asn1Spec=rfc2898.PBEParameter())[0]
+            params_asn1 = asn1_checked_decode(sealed_obj.encodedParams, asn1Spec=rfc2898.PBEParameter())
             salt = params_asn1['salt'].asOctets()
             iteration_count = int(params_asn1['iterationCount'])
             try:
