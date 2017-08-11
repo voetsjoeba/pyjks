@@ -8,7 +8,7 @@ import java.util.Map;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.apache.commons.codec.binary.Hex;
-import org.apache.commons.codec.binary.StringUtils;
+import org.bouncycastle.util.Arrays;
 import org.junit.Test;
 
 /**
@@ -120,29 +120,41 @@ public class KeystoreGeneratorTest extends PyJksTestCase
 	}
 
 	@Test
-	public void generate_non_ascii_jks_password() throws Exception
+	public void generate_unicode_passwords() throws Exception
 	{
-		// The JKS keystore protector algorithm says that the password is expected to be ASCII but it doesn't enforce that,
-		// so there's nothing stopping you from using non-ASCII passwords anyway. Let's generate one and see if we can parse it.
-		KeyPair keyPair = generateKeyPair("RSA", 2048);
+		// In JKS keystores:
+		//  - the store password can contain arbitrary unicode characters; it is taken in UTF16-BE encoded form to be mixed into the store hash
+		//  - entry passwords are expected to be printable ASCII, but this is not enforced, so there's nothing stopping you from using arbitrary
+		//    unicode characters anyway.
+		//
+		// In JCEKS keystores:
+		//  - the store password is the same as in JKS, i.e. can contain arbitrary unicode characters
+		//  - entry passwords must be ~printable ASCII only, and this is enforced (accepted byte range is 0x20 <= b <= 0xFE).
+		//
+		// Let's generate some keystores with fancy passwords and see if we can parse them.
+		KeyPair keyPair = generateKeyPair("RSA", 1024);
 
-		Certificate cert = createSelfSignedCertificate(keyPair, "CN=non_ascii_password");
+		Certificate cert = createSelfSignedCertificate(keyPair, "CN=unicode_passwords");
 		Certificate[] certs = new Certificate[]{cert};
 
-		// Note: prefer not to use the \\uXXXX syntax here because the Java compiler interprets them *prior* to lexing (!)
-		// causing them to interfere with syntax ...
-		String non_ascii_password = StringUtils.newStringUtf16Be(new byte[]{
-			(byte) 0x10, (byte) 0xDA,
-			(byte) 0x00, (byte) 0x28,
-			(byte) 0x0C, (byte) 0xA0,
-			(byte) 0x76, (byte) 0xCA,
-			(byte) 0x0C, (byte) 0xA0,
-			(byte) 0x10, (byte) 0xDA,
-			(byte) 0x00, (byte) 0x29,
-		});
+		// use some code points from various different unicode blocks/encoding ranges and/or some special characters
+		int[] codePoints = new int[]{
+			0x00000000, // NUL
+			0x00000041, // A                                   range 0x0000 - 0x007F
+			0x000000B3, // superscript three                   range 0x0080 - 0x07FF
+			0x000005E4, // hebrew letter PE                    range 0x0080 - 0x07FF
+			0x0000080A, // samaritan letter kaaf               range 0x0800 - 0xD800
+			0x0000D7FB, // hangul jongseong phieuph-thieuth    range 0x0800 - 0xD800
+			0x0000E000, // private use area                    range 0xE000 - 0xFFFF
+			0x0000FFEE, // halfwidth white circle              range 0xE000 - 0xFFFF
+			0x000100A6, // linear b ideogram b158              range 0x10000 - 0x10FFFF
+		};
+		String fancyStorePassword = codePointsToString(codePoints);
+		String fancyEntryPassword = codePointsToString(Arrays.reverse(codePoints));
 
-		generatePrivateKeyStore("JKS", "../keystores/jks/non_ascii_password.jks", keyPair.getPrivate(), certs, non_ascii_password, non_ascii_password, "mykey");
+		generatePrivateKeyStore("JKS",   "../keystores/jks/unicode_passwords.jks",     keyPair.getPrivate(), certs, fancyStorePassword, fancyEntryPassword, "mykey");
+		generatePrivateKeyStore("JCEKS", "../keystores/jceks/unicode_passwords.jceks", keyPair.getPrivate(), certs, fancyStorePassword, "12345678", "mykey");
 
-		writePythonDataFile("../expected/jks_non_ascii_password.py", keyPair, certs);
+		writePythonDataFile("../expected/unicode_passwords.py", keyPair, certs);
 	}
 }
