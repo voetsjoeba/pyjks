@@ -370,7 +370,14 @@ class SecretKeyEntry(AbstractKeystoreEntry):
         # object for a completely different one at serialization time.
         # Again for SunJCE, the substitute object that gets serialized
         # is usually a java.security.KeyRep object.
-        obj, dummy = KeyStore._read_java_obj(plaintext, 0)
+        obj = None
+        try:
+            obj, dummy = KeyStore._read_java_obj(plaintext, 0)
+        except Exception as e:
+            # at this point, either a wrong password was used that happened to decrypt into valid padding bytes, or the content of the entry is
+            # not a valid secret key.
+            raise DecryptionFailureException("Failed to decrypt data for secret key '%s'; wrong password or corrupted entry data?" % (self.alias,))
+
         clazz = obj.get_class()
         if clazz.name == "javax.crypto.spec.SecretKeySpec":
             algorithm = obj.algorithm
