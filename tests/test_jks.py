@@ -114,6 +114,29 @@ class AbstractTest(unittest.TestCase):
         self.assertEqual(sk.key_size, key_size)
         self.assertEqual(sk.key, key_bytes)
 
+    def check_bks_key_equal(self, bkey1, bkey2):
+        self.assertEqual(bkey1.type, bkey2.type)
+        self.assertEqual(bkey1.format, bkey2.format)
+        self.assertEqual(bkey1.algorithm, bkey2.algorithm)
+        self.assertEqual(bkey1.encoded, bkey2.encoded)
+
+        if bkey1.type == jks.BksKeyEntry.KEY_TYPE_PRIVATE:
+            self.assertEqual(bkey1.pkey_pkcs8, bkey2.pkey_pkcs8)
+            self.assertEqual(bkey1.pkey, bkey2.pkey)
+            self.assertEqual(bkey1.algorithm_oid, bkey2.algorithm_oid)
+        elif bkey1.type == jks.BksKeyEntry.KEY_TYPE_PUBLIC:
+            self.assertEqual(bkey1.public_key_info, bkey2.public_key_info)
+            self.assertEqual(bkey1.public_key, bkey2.public_key)
+            self.assertEqual(bkey1.algorithm_oid, bkey2.algorithm_oid)
+        elif bkey1.type == jks.BksKeyEntry.KEY_TYPE_SECRET:
+            self.assertEqual(bkey1.key, bkey2.key)
+            self.assertEqual(bkey1.key_size, bkey2.key_size)
+        else:
+            self.fail()
+
+    def check_bks_secret_key_equal(self, sk1, sk2):
+        self.assertEqual(sk1.key, sk2.key)
+
     def _test_create_and_load_keystore(self, store_type, store_pw, entry_list, entry_passwords=None):
         """
         Helper function; creates a store of the given type, inserts the given set of entries, and forwards it to save_reload_and_verify_identical
@@ -156,6 +179,12 @@ class AbstractTest(unittest.TestCase):
                 self.check_secret_key_equal(item1, item2.algorithm, len(item2.key)*8, item2.key)
             elif isinstance(item1, jks.TrustedCertEntry):
                 self.check_cert_equal(item1, item2.type, item2.cert)
+            elif isinstance(item1, jks.BksTrustedCertEntry):
+                self.check_cert_equal(item1, item2.type, item2.cert)
+            elif isinstance(item1, jks.BksKeyEntry) or isinstance(item1, jks.BksSealedKeyEntry):
+                self.check_bks_key_equal(item1, item2)
+            elif isinstance(item1, jks.BksSecretKeyEntry):
+                self.check_bks_secret_key_equal(item1, item2)
             else:
                 self.fail("Unexpected store entry (type %s)" % type(item1))
 
@@ -181,6 +210,19 @@ class AbstractTest(unittest.TestCase):
                 self.check_secret_key_equal(item1, itemdict2["algorithm"], len(java2bytes(itemdict2["encoded"]))*8, java2bytes(itemdict2["encoded"]))
             elif isinstance(item1, jks.jks.TrustedCertEntry):
                 self.check_cert_equal(item1, itemdict2["cert_type"], java2bytes(itemdict2["cert_data"]))
+            elif isinstance(item1, jks.BksTrustedCertEntry):
+                self.check_cert_equal(item1, itemdict2["cert_type"], java2bytes(itemdict2["cert_data"]))
+            elif isinstance(item1, jks.BksKeyEntry) or isinstance(item1, jks.BksSealedKeyEntry):
+                typemap = {
+                    "private": jks.BksKeyEntry.KEY_TYPE_PRIVATE,
+                    "public": jks.BksKeyEntry.KEY_TYPE_PUBLIC,
+                    "secret": jks.BksKeyEntry.KEY_TYPE_SECRET,
+                }
+                item2 = jks.BksKeyEntry(typemap[itemdict2["type"]], itemdict2["format"], itemdict2["algorithm"], java2bytes(itemdict2["encoded"]))
+                self.check_bks_key_equal(item1, item2)
+            elif isinstance(item1, jks.BksSecretKeyEntry):
+                item2 = jks.BksSecretKeyEntry(encrypted=java2bytes(itemdict2["encoded"]))
+                self.check_bks_secret_key_equal(item1, item2)
             else:
                 self.fail("Unexpected store entry (type %s)" % type(item1))
 
@@ -642,7 +684,7 @@ class JceSecretKeySaveTests(AbstractTest):
         sk = self.find_secret_key(store, "mykey")
         self.assertRaises(jks.util.UnsupportedKeystoreEntryTypeException, jks.KeyStore.new, 'jks', [sk])
 
-class BksOnlyTests(AbstractTest):
+class BksLoadTests(AbstractTest):
     def check_bks_entry(self, entry, store_type):
         """Checks that apply to BKS entries of any type"""
         self.assertEqual(entry.store_type, store_type)
@@ -891,6 +933,44 @@ class BksOnlyTests(AbstractTest):
         self.assertEqual(jks.bks.BksKeyEntry.type2str(jks.bks.BksKeyEntry.KEY_TYPE_SECRET),  "SECRET")
         self.assertEqual(jks.bks.BksKeyEntry.type2str(-1),  None)
 
+class BksSaveTests(AbstractTest):
+    def test_create_and_load_empty_keystore(self):
+        self._test_create_and_load_keystore("bks",  "12345678", {})
+        self._test_create_and_load_keystore("uber", "12345678", {})
+
+    def test_create_and_load_keystore_pkcs8_rsa(self):
+        bk = jks.BksKeyEntry(jks.BksKeyEntry.KEY_TYPE_PRIVATE, "PKCS#8", "RSA", expected.RSA2048_3certs.private_key)
+        slk = jks.BksSealedKeyEntry(alias="mykey", timestamp=int(time.time())*1000, cert_chain=[jks.BksTrustedCertEntry.new("X.509", data) for data in expected.RSA2048_3certs.certs])
+        slk._nested = bk
+
+        self._test_create_and_load_keystore("bks",  "12345678", [slk])
+        self._test_create_and_load_keystore("uber", "12345678", [slk])
+
+    def test_create_and_load_keystore_public_key(self):
+        bk = jks.BksKeyEntry(jks.BksKeyEntry.KEY_TYPE_PUBLIC, "X.509", "RSA", expected.RSA2048_3certs.public_key)
+        slk = jks.BksSealedKeyEntry(alias="mykey", timestamp=int(time.time())*1000)
+        slk._nested = bk
+
+        self._test_create_and_load_keystore("bks",  "12345678", [slk])
+        self._test_create_and_load_keystore("uber", "12345678", [slk])
+
+    def _test_create_and_load_keystore_secret_key(self, sk_alg, sk_key):
+        bk = jks.BksKeyEntry(jks.BksKeyEntry.KEY_TYPE_SECRET, "RAW", sk_alg, sk_key)
+        slk = jks.BksSealedKeyEntry(alias="mykey", timestamp=int(time.time())*1000)
+        slk._nested = bk
+
+        self._test_create_and_load_keystore("bks",  "12345678", [slk])
+        self._test_create_and_load_keystore("uber", "12345678", [slk])
+
+    def test_create_and_load_keystore_secret_key(self):
+        self._test_create_and_load_keystore_secret_key("DES", b"\x4c\xf2\xfe\x91\x5d\x08\x2a\x43")
+        self._test_create_and_load_keystore_secret_key("DESede", b"\x67\x5e\x52\x45\xe9\x67\x3b\x4c\x8f\xc1\x94\xce\xec\x43\x3b\x31\x8c\x45\xc2\xe0\x67\x5e\x52\x45")
+        self._test_create_and_load_keystore_secret_key("AES", b"\x66\x6e\x02\x21\xcc\x44\xc1\xfc\x4a\xab\xf4\x58\xf9\xdf\xdd\x3c")
+        self._test_create_and_load_keystore_secret_key("AES", b"\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f\x68\x77\x12\xfd\xe4\xbe\x52\xe9\xe7\xd7\xc2\x62\x66\x82\x21\x78\x7b\x6b\x5a\x0f")
+        self._test_create_and_load_keystore_secret_key("PBKDF2WithHmacSHA1", b"\x57\x95\x36\xd9\xa2\x7f\x7e\x31\x4e\xf4\xe3\xff\xa5\x76\x26\xef\xe6\x70\xe8\xf4\xd2\x96\xcd\x31\xba\x1a\x82\x7d\x9a\x3b\x1e\xe1")
+
+    # Note: can only roundtrip-test BksSealedKeyEntries, because other entry types are no longer readable in any remotely recent BC version.
+    # The oldest version I was able to find was bcprov-jdk14-1.19.jar, which already no longer supports those keys.
 
 class MiscTests(AbstractTest):
     def test_decode_modified_utf8(self):
