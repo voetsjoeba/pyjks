@@ -191,8 +191,17 @@ class BksSealedKeyEntry(AbstractBksEntry):
         except BadPaddingException:
             raise DecryptionFailureException("Failed to decrypt data for key '%s'; wrong password?" % self.alias)
 
-        # the plaintext content of a SealedEntry is a KeyEntry
-        key_entry, dummy = BksKeyStore._read_bks_key(decrypted, 0, self.store_type)
+        # The key protection scheme is password-based encryption with PKCS#5/7 padding, so any wrong password has a 1/256
+        # chance of producing a 0x01 byte as the last byte and passing the padding check but producing garbage plaintext.
+        #
+        # The plaintext of a SealedKeyEntry is an (encoded) BksKey, so attempt to parse it as such; if that fails, then
+        # either the password was wrong and we hit a 1/256 case, or the password was right and the data is genuinely corrupt.
+        # In sane use cases the latter shouldn't happen, so let's report the former.
+        try:
+            key_entry, dummy = BksKeyStore._read_bks_key(decrypted, 0, self.store_type)
+        except KeystoreException as e:
+            raise DecryptionFailureException("Failed to decrypt data for key '%s'; wrong password?" % self.alias, e)
+
         key_entry.store_type = self.store_type
         key_entry.cert_chain = self.cert_chain
         key_entry.alias = self.alias
