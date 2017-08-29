@@ -157,7 +157,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
             private_key_info.setComponentByName('version','v1')
             a = rfc2459.AlgorithmIdentifier()
             a.setComponentByName('algorithm', pke._algorithm_oid)
-            a.setComponentByName('parameters', univ.Null())
+            a.setComponentByName('parameters', univ.Any(encoder.encode(univ.Null())))
             private_key_info.setComponentByName('privateKeyAlgorithm', a)
             private_key_info.setComponentByName('privateKey', key)
 
@@ -257,7 +257,7 @@ class PrivateKeyEntry(AbstractKeystoreEntry):
         if store_type == "jks":
             ciphertext = sun_crypto.jks_pkey_encrypt(self.pkey_pkcs8, key_password)
             a.setComponentByName('algorithm', sun_crypto.SUN_JKS_ALGO_ID)
-            a.setComponentByName('parameters', univ.Null())
+            a.setComponentByName('parameters', univ.Any(encoder.encode(univ.Null())))
 
         elif store_type == "jceks":
             ciphertext, salt, iteration_count = sun_crypto.jce_pbe_encrypt(self.pkey_pkcs8, key_password)
